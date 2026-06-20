@@ -1,0 +1,274 @@
+// Unit definitions for all civilizations
+const UNIT_DEFS = {
+    worker: {
+        id: 'worker',
+        name: 'Dorfbewohner',
+        cost: { food: 50, wood: 0, stone: 0, gold: 0 },
+        health: 40,
+        speed: 1.0,
+        attack: 3,
+        range: 0.5,
+        type: 'worker',
+        harvestRate: 1.0,
+        buildSpeed: 1.0,
+        description: 'Baut Gebäude und sammelt Ressourcen'
+    },
+    militia: {
+        id: 'militia',
+        name: 'Miliz',
+        cost: { food: 50, wood: 20, stone: 0, gold: 0 },
+        health: 70,
+        speed: 1.1,
+        attack: 7,
+        range: 0.5,
+        type: 'infantry',
+        tier: 'stone',
+        description: 'Grundlegende Infanterieeinheit'
+    },
+    warrior: {
+        id: 'warrior',
+        name: 'Krieger',
+        cost: { food: 80, wood: 0, stone: 30, gold: 20 },
+        health: 120,
+        speed: 1.0,
+        attack: 12,
+        range: 0.5,
+        type: 'infantry',
+        tier: 'bronze',
+        description: 'Starker Infanterist'
+    },
+    champion: {
+        id: 'champion',
+        name: 'Champion',
+        cost: { food: 150, wood: 50, stone: 50, gold: 100 },
+        health: 200,
+        speed: 1.5,
+        attack: 18,
+        range: 0.5,
+        type: 'infantry',
+        tier: 'iron',
+        description: 'Eliteeinheit'
+    },
+    archer: {
+        id: 'archer',
+        name: 'Bogenschütze',
+        cost: { food: 60, wood: 30, stone: 0, gold: 0 },
+        health: 40,
+        speed: 1.0,
+        attack: 6,
+        range: 4,
+        type: 'ranged',
+        tier: 'neolithic',
+        description: 'Fernkampf-Einheit'
+    },
+    crossbowman: {
+        id: 'crossbowman',
+        name: 'Armbrustschütze',
+        cost: { food: 100, wood: 40, stone: 20, gold: 30 },
+        health: 60,
+        speed: 0.9,
+        attack: 12,
+        range: 4.5,
+        type: 'ranged',
+        tier: 'iron',
+        description: 'Starker Fernkämpfer mit Armbrust'
+    },
+    elite_archer: {
+        id: 'elite_archer',
+        name: 'Elite-Bogenschütze',
+        cost: { food: 150, wood: 60, stone: 30, gold: 50 },
+        health: 80,
+        speed: 1.1,
+        attack: 16,
+        range: 5,
+        type: 'ranged',
+        tier: 'iron',
+        description: 'Elite Fernkampf-Einheit'
+    },
+    scout_cavalry: {
+        id: 'scout_cavalry',
+        name: 'Aufklärungskavallerie',
+        cost: { food: 100, wood: 0, stone: 0, gold: 30 },
+        health: 100,
+        speed: 2.2,
+        attack: 8,
+        range: 0.5,
+        type: 'cavalry',
+        tier: 'neolithic',
+        description: 'Schnelle Kavallerieeinheit'
+    },
+    cavalry: {
+        id: 'cavalry',
+        name: 'Reiter',
+        cost: { food: 120, wood: 0, stone: 0, gold: 50 },
+        health: 140,
+        speed: 2.0,
+        attack: 12,
+        range: 0.5,
+        type: 'cavalry',
+        tier: 'bronze',
+        description: 'Schwerer Reiter'
+    },
+    heavy_cavalry: {
+        id: 'heavy_cavalry',
+        name: 'Schwere Kavallerie',
+        cost: { food: 180, wood: 0, stone: 50, gold: 80 },
+        health: 200,
+        speed: 1.8,
+        attack: 18,
+        range: 0.5,
+        type: 'cavalry',
+        tier: 'iron',
+        description: 'Elite Kavallerie'
+    },
+    priest: {
+        id: 'priest',
+        name: 'Priester',
+        cost: { food: 50, wood: 0, stone: 0, gold: 30 },
+        health: 60,
+        speed: 1.2,
+        attack: 3,
+        range: 3,
+        type: 'support',
+        tier: 'bronze',
+        description: 'Heilt andere Einheiten in der Nähe'
+    }
+};
+
+function getUnitDef(id) {
+    return UNIT_DEFS[id] || null;
+}
+
+// Create a unit instance
+function createUnit(type, x, z, owner, civilization, age) {
+    const def = getUnitDef(type);
+    if (!def) return null;
+
+    const civ = getCivilization(civilization);
+    const uniqueUnit = civ.uniqueUnits.find(u => u.id === type);
+    const unitDef = uniqueUnit || def;
+
+    return {
+        id: 'unit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        type: type,
+        name: unitDef.name,
+        x: x,
+        z: z,
+        health: unitDef.health,
+        maxHealth: unitDef.health,
+        speed: unitDef.speed,
+        attack: unitDef.attack,
+        range: unitDef.range,
+        unitType: unitDef.type,
+        owner: owner,
+        civilization: civilization,
+        color: civ.color, // Always use civilization color (important for spectator mode)
+        currentTier: age || 'stone', // Track the age/tier this unit was created at
+        targetX: x,
+        targetZ: z,
+        isMoving: false,
+        isAttacking: false,
+        attackTarget: null,
+        harvestTarget: null,
+        harvestAmount: 0,
+        maxHarvest: 15,
+        isHarvesting: false,
+        isBuilding: false,
+        buildProgress: 0,
+        selected: false,
+        mesh: null,
+        healthBar: null,
+        harvestRate: unitDef.harvestRate || 1.0,
+        buildSpeed: unitDef.buildSpeed || 1.0
+    };
+}
+
+// Create a building instance.
+// options.underConstruction => starts as a construction site (low HP, not yet functional);
+// a worker must build it up over buildingDef.buildTime before it works.
+const BUILDING_AGE_ORDER = ['stone', 'neolithic', 'bronze', 'iron'];
+
+// Max HP for a building of a given def/civ/age. Each epoch adds 50% over the
+// previous one (×1.5 per age), rounded to the nearest 50 for clean numbers.
+// Wonders are exempt (their iron-age HP is tuned separately).
+function buildingMaxHealth(buildingDef, civ, age) {
+    const healthMultiplier = (civ && civ.bonus && civ.bonus.name === 'Pyramide') ? 1.5 :
+                             (civ && civ.bonus && civ.bonus.name === 'Akropolis') ? 1.3 : 1.0;
+    const idx = Math.max(0, BUILDING_AGE_ORDER.indexOf(age));
+    const ageMultiplier = (buildingDef.type === 'wonder') ? 1 : Math.pow(1.5, idx);
+    return Math.max(50, Math.round(buildingDef.health * ageMultiplier * healthMultiplier / 50) * 50);
+}
+
+// Morph an existing building to a newer epoch: bump its age, rescale max HP
+// (preserving the current damage ratio) and report whether anything changed so
+// the caller can rebuild its mesh. Never downgrades; skips wonders.
+function upgradeBuildingToAge(building, newAge) {
+    if (!building || BUILDING_AGE_ORDER.indexOf(newAge) < 0) return false;
+    if (BUILDING_AGE_ORDER.indexOf(newAge) <= BUILDING_AGE_ORDER.indexOf(building.age)) return false;
+    const civ = getCivilization(building.civilization);
+    const uniqueBuilding = civ.uniqueBuildings.find(b => b.id === building.type);
+    const buildingDef = uniqueBuilding || BUILDING_DEFS[building.type];
+    if (!buildingDef || buildingDef.type === 'wonder') return false;
+    const ratio = building.maxHealth > 0 ? (building.health / building.maxHealth) : 1;
+    building.age = newAge;
+    building.maxHealth = buildingMaxHealth(buildingDef, civ, newAge);
+    building.health = Math.max(1, Math.round(building.maxHealth * ratio));
+    return true;
+}
+
+function createBuilding(type, x, z, owner, civilization, options) {
+    const civ = getCivilization(civilization);
+    const uniqueBuilding = civ.uniqueBuildings.find(b => b.id === type);
+    const buildingDef = uniqueBuilding || BUILDING_DEFS[type];
+
+    if (!buildingDef) return null;
+
+    // The epoch this building is constructed in drives both its look and its HP.
+    // Owners morph their buildings to the new epoch when they age up (see
+    // upgradeBuildingToAge / game.morphBuildingsToAge).
+    const age = (options && options.age && BUILDING_AGE_ORDER.includes(options.age)) ? options.age : 'stone';
+
+    const underConstruction = !!(options && options.underConstruction);
+    const maxHealth = buildingMaxHealth(buildingDef, civ, age);
+    const buildTime = buildingDef.buildTime || 10000;
+
+    return {
+        id: 'building_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        type: type,
+        name: buildingDef.name,
+        age: age, // epoch this building was constructed in (drives its look + HP)
+        x: x,
+        z: z,
+        // Construction sites start partially built and ramp up as workers build them
+        underConstruction: underConstruction,
+        buildProgress: 0,
+        buildTime: buildTime,
+        isWonder: buildingDef.type === 'wonder',
+        health: underConstruction ? Math.max(1, maxHealth * 0.2) : maxHealth,
+        maxHealth: maxHealth,
+        owner: owner,
+        civilization: civilization,
+        color: owner === 'player' ? 0x4ecca3 : 0xff4444,
+        selected: false,
+        mesh: null,
+        healthBar: null,
+        canTrain: buildingDef.canTrain || false,
+        canResearch: buildingDef.canResearch || false,
+        trainOptions: buildingDef.trainOptions || [],
+        researchOptions: buildingDef.researchOptions || [],
+        productionQueue: [],
+        isProducing: false,
+        productionProgress: 0,
+        productionTime: 0,
+        productionDuration: 0,
+        attack: buildingDef.attack || 0,
+        range: buildingDef.range || 0,
+        // Farm-specific properties
+        foodAmount: type === 'farm' ? 300 : 0,
+        maxFoodAmount: type === 'farm' ? 300 : 0,
+        regenTimer: type === 'farm' ? 0 : undefined,
+        assignedWorker: type === 'farm' ? null : undefined
+    };
+}
+
+// Building definitions are now in buildings.js

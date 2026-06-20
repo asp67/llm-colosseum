@@ -1,0 +1,863 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlayerGameState",
+  "description": "Complete game state for a particular player, including all visible information about the game world, resources, units, buildings, research, and epoch.",
+  "type": "object",
+  "properties": {
+    "player": {
+      "type": "object",
+      "description": "Core player identity and civilization data.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique player identifier (e.g. 'player' or 'ai-1')."
+        },
+        "civilization": {
+          "type": "string",
+          "enum": ["egyptian", "greek", "persian", "yamato"],
+          "description": "Player's chosen civilization."
+        },
+        "civilizationName": {
+          "type": "string",
+          "description": "Display name of the civilization (e.g. 'Ägypter')."
+        },
+        "color": {
+          "type": "integer",
+          "description": "Three.js color value for the player (e.g. 0xffd700 for Egyptian)."
+        },
+        "isHuman": {
+          "type": "boolean",
+          "description": "Whether this player is human-controlled (true) or AI (false)."
+        }
+      },
+      "required": ["id", "civilization", "civilizationName", "color", "isHuman"]
+    },
+    "epoch": {
+      "type": "object",
+      "description": "Current epoch/age information and the next available epoch upgrade.",
+      "properties": {
+        "currentEpoch": {
+          "type": "string",
+          "enum": ["stone", "neolithic", "bronze", "iron"],
+          "description": "Current epoch. stone=Altsteinzeit, neolithic=Jungsteinzeit, bronze=Bronzezeit, iron=Eisenzeit."
+        },
+        "currentEpochName": {
+          "type": "string",
+          "description": "Display name of current epoch (e.g. '🏺 Altsteinzeit')."
+        },
+        "nextEpoch": {
+          "type": "string",
+          "enum": ["neolithic", "bronze", "iron", null],
+          "description": "Next available epoch. Null if already in the final epoch (iron)."
+        },
+        "nextEpochName": {
+          "type": "string",
+          "description": "Display name of next epoch."
+        },
+        "nextEpochCost": {
+          "type": "object",
+          "description": "Resource cost to advance to the next epoch.",
+          "properties": {
+            "food": { "type": "number" },
+            "wood": { "type": "number" },
+            "stone": { "type": "number" },
+            "gold": { "type": "number" }
+          },
+          "required": ["food", "wood", "stone", "gold"]
+        },
+        "nextEpochResearchTime": {
+          "type": "number",
+          "description": "Time in milliseconds required for the epoch upgrade (default: 30000)."
+        },
+        "upgradeInProgress": {
+          "type": "object",
+          "description": "Details of the currently active epoch upgrade, or null if none.",
+          "properties": {
+            "targetEpoch": {
+              "type": "string",
+              "enum": ["neolithic", "bronze", "iron"]
+            },
+            "progress": {
+              "type": "number",
+              "description": "Current progress in milliseconds."
+            },
+            "duration": {
+              "type": "number",
+              "description": "Total duration in milliseconds."
+            },
+            "progressPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Progress as a percentage (0-100)."
+            }
+          },
+          "required": ["targetEpoch", "progress", "duration", "progressPercent"]
+        }
+      },
+      "required": ["currentEpoch", "currentEpochName", "nextEpoch", "nextEpochName", "nextEpochCost", "nextEpochResearchTime"]
+    },
+    "resources": {
+      "type": "object",
+      "description": "Current resource counts and population statistics.",
+      "properties": {
+        "food": {
+          "type": "number",
+          "description": "Available food."
+        },
+        "wood": {
+          "type": "number",
+          "description": "Available wood."
+        },
+        "stone": {
+          "type": "number",
+          "description": "Available stone."
+        },
+        "gold": {
+          "type": "number",
+          "description": "Available gold."
+        },
+        "population": {
+          "type": "number",
+          "description": "Current population (number of units)."
+        },
+        "maxPopulation": {
+          "type": "number",
+          "description": "Maximum population (base 10, +5 per house)."
+        },
+        "populationFree": {
+          "type": "number",
+          "description": "Remaining population slots (maxPopulation - population)."
+        },
+        "harvestRate": {
+          "type": "number",
+          "description": "Global harvest rate multiplier."
+        }
+      },
+      "required": ["food", "wood", "stone", "gold", "population", "maxPopulation", "populationFree", "harvestRate"]
+    },
+    "bonuses": {
+      "type": "object",
+      "description": "Active stat bonuses from civilization and researched technologies.",
+      "properties": {
+        "workerHarvestBonus": {
+          "type": "number",
+          "description": "Harvest speed multiplier for workers (e.g. 1.0 = no bonus, 1.25 = +25%)."
+        },
+        "trainSpeedBonus": {
+          "type": "number",
+          "description": "Training speed multiplier for military buildings."
+        },
+        "workerBuildSpeedBonus": {
+          "type": "number",
+          "description": "Building speed multiplier for workers."
+        },
+        "techCostMultiplier": {
+          "type": "number",
+          "description": "Multiplier for technology research costs (e.g. 0.7 = -30% cost for Yamato)."
+        },
+        "buildingHealthMultiplier": {
+          "type": "number",
+          "description": "Health multiplier for buildings (e.g. 1.5 = +50% for Egyptian)."
+        },
+        "miningBonus": {
+          "type": "number"
+        },
+        "healthBonus": {
+          "type": "number"
+        },
+        "attackBonus": {
+          "type": "number"
+        },
+        "workerSpeedBonus": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "workerHarvestBonus",
+        "trainSpeedBonus",
+        "workerBuildSpeedBonus",
+        "techCostMultiplier",
+        "buildingHealthMultiplier"
+      ]
+    },
+    "map": {
+      "type": "object",
+      "description": "Map dimensions and fog-of-war visibility data.",
+      "properties": {
+        "size": {
+          "type": "number",
+          "description": "Map size in world units (e.g. 800)."
+        },
+        "gridSize": {
+          "type": "number",
+          "description": "Size of each fog-of-war grid cell (e.g. 2)."
+        },
+        "numTiles": {
+          "type": "number",
+          "description": "Number of tiles per axis (size / gridSize, e.g. 400)."
+        },
+        "fogGrid": {
+          "type": "array",
+          "description": "Flattened 2D array of fog states. Index = gz * numTiles + gx. Values: 0 = unexplored (hidden), 1 = explored (dark/visible but not in vision), 2 = visible (currently in vision range).",
+          "items": {
+            "type": "number",
+            "enum": [0, 1, 2]
+          }
+        }
+      },
+      "required": ["size", "gridSize", "numTiles", "fogGrid"]
+    },
+    "resourcesOnMap": {
+      "type": "array",
+      "description": "All visible resource nodes on the map (only those in explored or visible fog tiles).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique resource node identifier."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["food", "wood", "stone", "gold"],
+            "description": "Resource type. food=deer/berries, wood=trees, stone=quarry, gold=mine."
+          },
+          "x": {
+            "type": "number",
+            "description": "World X position."
+          },
+          "z": {
+            "type": "number",
+            "description": "World Z position."
+          },
+          "amount": {
+            "type": "number",
+            "description": "Remaining resource amount at this node."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["visible", "explored"],
+            "description": "Current visibility state. 'visible' = in direct vision range, 'explored' = previously seen but not currently in vision."
+          }
+        },
+        "required": ["id", "type", "x", "z", "amount", "visibility"]
+      }
+    },
+    "buildings": {
+      "type": "array",
+      "description": "All visible buildings on the map (friend and foe), only those in explored or visible fog tiles.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique building identifier."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "town_center", "house", "temple", "barracks", "stable",
+              "archery_range", "market", "farm", "wall", "tower",
+              "pyramid", "akropolis", "firetemple", "shrine"
+            ],
+            "description": "Building type ID."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (e.g. 'Dorfzentrum', 'Kaserne')."
+          },
+          "buildingType": {
+            "type": "string",
+            "enum": ["economic", "military", "religious", "defense", "wonder"],
+            "description": "Category of the building."
+          },
+          "x": {
+            "type": "number",
+            "description": "World X position."
+          },
+          "z": {
+            "type": "number",
+            "description": "World Z position."
+          },
+          "health": {
+            "type": "number",
+            "description": "Current health."
+          },
+          "maxHealth": {
+            "type": "number",
+            "description": "Maximum health."
+          },
+          "healthPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Health as a percentage."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner identifier (e.g. 'player' or 'ai-1')."
+          },
+          "isFriendly": {
+            "type": "boolean",
+            "description": "Whether this building belongs to the player (true) or an opponent (false)."
+          },
+          "civilization": {
+            "type": "string",
+            "description": "Civilization of the building's owner."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["visible", "explored"],
+            "description": "Current visibility state."
+          },
+          "productionQueue": {
+            "type": "array",
+            "description": "Queue of units currently being produced (only for friendly buildings).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Unit type ID being produced."
+                },
+                "progress": {
+                  "type": "number",
+                  "description": "Current progress in milliseconds."
+                },
+                "duration": {
+                  "type": "number",
+                  "description": "Total production duration in milliseconds."
+                },
+                "progressPercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              },
+              "required": ["type", "progress", "duration", "progressPercent"]
+            }
+          },
+          "isProducing": {
+            "type": "boolean",
+            "description": "Whether this building is currently producing a unit."
+          },
+          "trainOptions": {
+            "type": "array",
+            "description": "Unit types that can be trained at this building (only for friendly buildings).",
+            "items": { "type": "string" }
+          },
+          "researchOptions": {
+            "type": "array",
+            "description": "Tech IDs that can be researched at this building (only for friendly buildings).",
+            "items": { "type": "string" }
+          },
+          "foodAmount": {
+            "type": "number",
+            "description": "Current food stored (for farms). 0 for non-farm buildings."
+          },
+          "maxFoodAmount": {
+            "type": "number",
+            "description": "Maximum food capacity (for farms). 0 for non-farm buildings."
+          },
+          "assignedWorker": {
+            "type": ["object", "null"],
+            "description": "Worker currently assigned to this building (e.g. farm worker), or null."
+          },
+          "attack": {
+            "type": "number",
+            "description": "Attack damage (for towers). 0 for non-combat buildings."
+          },
+          "range": {
+            "type": "number",
+            "description": "Attack range (for towers). 0 for non-combat buildings."
+          }
+        },
+        "required": [
+          "id", "type", "name", "buildingType", "x", "z",
+          "health", "maxHealth", "healthPercent", "owner", "isFriendly",
+          "civilization", "visibility"
+        ]
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "All visible units on the map (friend and foe), only those in explored or visible fog tiles.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique unit identifier."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "worker", "militia", "warrior", "champion", "archer",
+              "crossbowman", "elite_archer", "scout_cavalry", "cavalry",
+              "heavy_cavalry", "priest"
+            ],
+            "description": "Unit type ID."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (e.g. 'Dorfbewohner', 'Krieger')."
+          },
+          "unitType": {
+            "type": "string",
+            "enum": ["worker", "infantry", "ranged", "cavalry", "support"],
+            "description": "Unit category."
+          },
+          "x": {
+            "type": "number",
+            "description": "Current world X position."
+          },
+          "z": {
+            "type": "number",
+            "description": "Current world Z position."
+          },
+          "health": {
+            "type": "number",
+            "description": "Current health."
+          },
+          "maxHealth": {
+            "type": "number",
+            "description": "Maximum health."
+          },
+          "healthPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Health as a percentage."
+          },
+          "attack": {
+            "type": "number",
+            "description": "Attack damage."
+          },
+          "range": {
+            "type": "number",
+            "description": "Attack range."
+          },
+          "speed": {
+            "type": "number",
+            "description": "Movement speed."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner identifier (e.g. 'player' or 'ai-1')."
+          },
+          "isFriendly": {
+            "type": "boolean",
+            "description": "Whether this unit belongs to the player (true) or an opponent (false)."
+          },
+          "civilization": {
+            "type": "string",
+            "description": "Civilization of the unit's owner."
+          },
+          "currentTier": {
+            "type": "string",
+            "enum": ["stone", "neolithic", "bronze", "iron"],
+            "description": "Epoch at which this unit was created (determines upgrade path)."
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["visible", "explored"],
+            "description": "Current visibility state."
+          },
+          "action": {
+            "type": "object",
+            "description": "Current action/state of the unit.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "idle", "moving", "attacking", "harvesting",
+                  "building", "returning_resources", "farm_work",
+                  "producing"
+                ],
+                "description": "Current action type."
+              },
+              "target": {
+                "type": ["object", "null"],
+                "description": "Target of the current action (unit, building, or resource node), or null.",
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "type": "string" },
+                  "name": { "type": "string" },
+                  "x": { "type": "number" },
+                  "z": { "type": "number" }
+                }
+              },
+              "targetPosition": {
+                "type": "object",
+                "description": "Movement target coordinates.",
+                "properties": {
+                  "x": { "type": "number" },
+                  "z": { "type": "number" }
+                },
+                "required": ["x", "z"]
+              },
+              "harvestInfo": {
+                "type": ["object", "null"],
+                "description": "Harvesting details (when action type is 'harvesting' or 'returning_resources').",
+                "properties": {
+                  "resourceType": {
+                    "type": "string",
+                    "enum": ["food", "wood", "stone", "gold"]
+                  },
+                  "carriedAmount": {
+                    "type": "number",
+                    "description": "Amount currently carried."
+                  },
+                  "maxCarry": {
+                    "type": "number",
+                    "description": "Maximum carry capacity (default: 15)."
+                  }
+                },
+                "required": ["resourceType", "carriedAmount", "maxCarry"]
+              },
+              "buildInfo": {
+                "type": ["object", "null"],
+                "description": "Building construction details (when action type is 'building').",
+                "properties": {
+                  "buildingType": { "type": "string" },
+                  "progress": { "type": "number" },
+                  "duration": { "type": "number" },
+                  "progressPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": ["buildingType", "progress", "duration", "progressPercent"]
+              }
+            },
+            "required": ["type"]
+          },
+          "selected": {
+            "type": "boolean",
+            "description": "Whether this unit is currently selected by the player (only meaningful for friendly units)."
+          }
+        },
+        "required": [
+          "id", "type", "name", "unitType", "x", "z",
+          "health", "maxHealth", "healthPercent", "attack", "range", "speed",
+          "owner", "isFriendly", "civilization", "visibility", "action"
+        ]
+      }
+    },
+    "research": {
+      "type": "object",
+      "description": "Technology research state: researched techs, currently active research, and available techs.",
+      "properties": {
+        "researchedTechs": {
+          "type": "array",
+          "description": "List of already researched (archived) technologies.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Tech ID (e.g. 'house', 'barracks', 'agriculture')."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name."
+              },
+              "description": {
+                "type": "string",
+                "description": "Tech description."
+              },
+              "researchAt": {
+                "type": "string",
+                "enum": ["town_center", "market"],
+                "description": "Building where this tech was researched."
+              },
+              "requiredAge": {
+                "type": "string",
+                "enum": ["stone", "neolithic", "bronze", "iron"],
+                "description": "Epoch required to research this tech."
+              },
+              "unlocks": {
+                "type": "object",
+                "description": "What this tech unlocked.",
+                "properties": {
+                  "buildings": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "unitTypes": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              },
+              "bonus": {
+                "type": "object",
+                "description": "Stat bonuses granted by this tech.",
+                "properties": {
+                  "attack": { "type": "number" },
+                  "health": { "type": "number" },
+                  "speed": { "type": "number" },
+                  "range": { "type": "number" },
+                  "harvestRate": { "type": "number" },
+                  "buildSpeed": { "type": "number" },
+                  "trainSpeed": { "type": "number" }
+                }
+              },
+              "appliesTo": {
+                "type": "string",
+                "enum": ["infantry", "cavalry", "ranged", "worker", "all_military", "all", "town_center"],
+                "description": "Which unit types receive the bonus."
+              }
+            },
+            "required": ["id", "name", "description", "researchAt", "requiredAge"]
+          }
+        },
+        "currentResearch": {
+          "type": ["object", "null"],
+          "description": "Currently active research, or null if nothing is being researched.",
+          "properties": {
+            "techId": {
+              "type": "string",
+              "description": "ID of the tech being researched."
+            },
+            "techName": {
+              "type": "string",
+              "description": "Display name of the tech."
+            },
+            "building": {
+              "type": "string",
+              "description": "Building type conducting the research (e.g. 'town_center', 'market')."
+            },
+            "progress": {
+              "type": "number",
+              "description": "Current progress in milliseconds."
+            },
+            "duration": {
+              "type": "number",
+              "description": "Total duration in milliseconds."
+            },
+            "progressPercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Progress as a percentage."
+            }
+          },
+          "required": ["techId", "techName", "building", "progress", "duration", "progressPercent"]
+        },
+        "availableTechs": {
+          "type": "array",
+          "description": "Technologies that can be researched with current epoch and prerequisites (not yet researched).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Tech ID."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name."
+              },
+              "description": {
+                "type": "string",
+                "description": "Tech description."
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "food": { "type": "number" },
+                  "wood": { "type": "number" },
+                  "stone": { "type": "number" },
+                  "gold": { "type": "number" }
+                },
+                "required": ["food", "wood", "stone", "gold"]
+              },
+              "researchAt": {
+                "type": "string",
+                "enum": ["town_center", "market"],
+                "description": "Building required to research this tech."
+              },
+              "requiredAge": {
+                "type": "string",
+                "enum": ["stone", "neolithic", "bronze", "iron"],
+                "description": "Epoch required."
+              },
+              "requires": {
+                "type": "array",
+                "description": "Prerequisite tech IDs that must be researched first.",
+                "items": { "type": "string" }
+              },
+              "researchTime": {
+                "type": "number",
+                "description": "Research duration in milliseconds."
+              },
+              "unlocks": {
+                "type": "object",
+                "properties": {
+                  "buildings": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "unitTypes": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              },
+              "bonus": {
+                "type": "object",
+                "properties": {
+                  "attack": { "type": "number" },
+                  "health": { "type": "number" },
+                  "speed": { "type": "number" },
+                  "range": { "type": "number" },
+                  "harvestRate": { "type": "number" },
+                  "buildSpeed": { "type": "number" },
+                  "trainSpeed": { "type": "number" }
+                }
+              },
+              "appliesTo": {
+                "type": "string"
+              },
+              "canAfford": {
+                "type": "boolean",
+                "description": "Whether the player can currently afford this tech."
+              },
+              "prerequisitesMet": {
+                "type": "boolean",
+                "description": "Whether all prerequisite techs have been researched."
+              },
+              "ageRequirementMet": {
+                "type": "boolean",
+                "description": "Whether the player's current epoch meets the requirement."
+              }
+            },
+            "required": [
+              "id", "name", "description", "cost", "researchAt",
+              "requiredAge", "requires", "researchTime",
+              "canAfford", "prerequisitesMet", "ageRequirementMet"
+            ]
+          }
+        }
+      },
+      "required": ["researchedTechs", "availableTechs"]
+    },
+    "unlockedContent": {
+      "type": "object",
+      "description": "Buildings and units that have been unlocked through researched technologies.",
+      "properties": {
+        "buildings": {
+          "type": "array",
+          "description": "Building types unlocked and available for construction.",
+          "items": { "type": "string" }
+        },
+        "units": {
+          "type": "array",
+          "description": "Unit types unlocked and available for training.",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["buildings", "units"]
+    },
+    "pendingBuildings": {
+      "type": "array",
+      "description": "Buildings that have been purchased and are awaiting placement on the map.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Building type ID."
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name."
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "food": { "type": "number" },
+              "wood": { "type": "number" },
+              "stone": { "type": "number" },
+              "gold": { "type": "number" }
+            },
+            "required": ["food", "wood", "stone", "gold"]
+          }
+        },
+        "required": ["type", "name", "cost"]
+      }
+    },
+    "gameStats": {
+      "type": "object",
+      "description": "General game session statistics and state.",
+      "properties": {
+        "gameSpeed": {
+          "type": "number",
+          "description": "Current game speed multiplier (1 = normal)."
+        },
+        "wonderTimer": {
+          "type": "number",
+          "description": "Current wonder hold timer in seconds (for wonder win condition). 0 if no wonder is held."
+        },
+        "wonderRequired": {
+          "type": "number",
+          "description": "Seconds required to hold the wonder for victory (default: 180)."
+        },
+        "wonderHeld": {
+          "type": "boolean",
+          "description": "Whether the wonder has been held long enough for victory."
+        },
+        "aiOpponents": {
+          "type": "array",
+          "description": "List of AI opponents in the game.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "AI player ID (e.g. 'ai-1')."
+              },
+              "civilization": {
+                "type": "string",
+                "description": "AI civilization."
+              },
+              "difficulty": {
+                "type": "string",
+                "description": "AI difficulty level."
+              },
+              "age": {
+                "type": "string",
+                "enum": ["stone", "neolithic", "bronze", "iron"],
+                "description": "AI current epoch."
+              },
+              "state": {
+                "type": "string",
+                "enum": ["economic", "military", "wonder"],
+                "description": "Current AI strategy state."
+              }
+            },
+            "required": ["id", "civilization", "difficulty", "age", "state"]
+          }
+        }
+      },
+      "required": ["gameSpeed", "wonderTimer", "wonderRequired", "wonderHeld", "aiOpponents"]
+    }
+  },
+  "required": [
+    "player",
+    "epoch",
+    "resources",
+    "bonuses",
+    "map",
+    "resourcesOnMap",
+    "buildings",
+    "units",
+    "research",
+    "unlockedContent",
+    "pendingBuildings",
+    "gameStats"
+  ]
+}

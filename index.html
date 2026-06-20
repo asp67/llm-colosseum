@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Colosseum</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Start Screen -->
+    <div id="startScreen" class="screen active">
+        <div class="start-content">
+            <h1 class="game-title">LLM COLOSSEUM</h1>
+            <p class="subtitle" data-i18n="start.subtitle">Wo Sprachmodelle in der Antike um die Krone kämpfen</p>
+            <div class="menu-buttons">
+                <button class="menu-btn" onclick="game.showGameModeSelection()" data-i18n="common.play">Spielen</button>
+                <button class="menu-btn" onclick="game.showTutorial()" data-i18n="common.tutorial">Tutorial</button>
+            </div>
+            <div class="lang-picker">
+                <span class="lang-globe">🌐</span>
+                <select class="lang-select" data-i18n-lang onchange="setUiLang(this.value)" aria-label="Language">
+                    <option value="en">English</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                    <option value="zh">中文</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Civilization Selection -->
+    <div id="civilizationScreen" class="screen">
+        <div class="selection-content">
+            <h2 data-i18n="civ.title">Wähle deine Zivilisation</h2>
+            <div class="civ-grid">
+                <div class="civ-card" onclick="game.selectCiv('egyptian')" data-civ="egyptian">
+                    <h3 data-i18n="civ.egyptian.name">🏛️ Ägypter</h3>
+                    <p data-i18n="civ.egyptian.special">Spezial: Pyramide (+50% Wandstärke)</p>
+                    <p data-i18n="civ.egyptian.strength">Stärke: Monumente, Heilung</p>
+                    <p data-i18n="civ.egyptian.weakness">Schwäche: Schwächere Armee</p>
+                </div>
+                <div class="civ-card" onclick="game.selectCiv('greek')" data-civ="greek">
+                    <h3 data-i18n="civ.greek.name">⚔️ Griechen</h3>
+                    <p data-i18n="civ.greek.special">Spezial: Akropolis (stärkere Gebäude)</p>
+                    <p data-i18n="civ.greek.strength">Stärke: Starke Infanterie, Philosophie</p>
+                    <p data-i18n="civ.greek.weakness">Schwäche: Weniger Einheiten</p>
+                </div>
+                <div class="civ-card" onclick="game.selectCiv('persian')" data-civ="persian">
+                    <h3 data-i18n="civ.persian.name">🏹 Perser</h3>
+                    <p data-i18n="civ.persian.special">Spezial: Satrapie (schnellere Wirtschaft)</p>
+                    <p data-i18n="civ.persian.strength">Stärke: Bogenschützen, Kavallerie</p>
+                    <p data-i18n="civ.persian.weakness">Schwäche: Schwächere Mauern</p>
+                </div>
+                <div class="civ-card" onclick="game.selectCiv('yamato')" data-civ="yamato">
+                    <h3 data-i18n="civ.yamato.name">⛩️ Yamato</h3>
+                    <p data-i18n="civ.yamato.special">Spezial: Schrein (schnellere Technologie)</p>
+                    <p data-i18n="civ.yamato.strength">Stärke: Schnelle Einheiten, Schiffe</p>
+                    <p data-i18n="civ.yamato.weakness">Schwäche: Weniger Ressourcen</p>
+                </div>
+            </div>
+            <button class="menu-btn back-btn" onclick="game.showGameModeSelection()" data-i18n="common.back">Zurück</button>
+        </div>
+    </div>
+
+    <!-- Game Mode Selection -->
+    <div id="gameModeScreen" class="screen">
+        <div class="selection-content">
+            <h2 data-i18n="mode.title">Wähle Spielmodus</h2>
+            <div class="mode-grid">
+                <div class="mode-card" onclick="game.startGame('standard', 3)">
+                    <h3 data-i18n="mode.standard">Standard</h3>
+                    <p data-i18n="mode.standardDesc">3 Computergegner</p>
+                </div>
+                <div class="mode-card" onclick="game.startGame('standard', 5)">
+                    <h3 data-i18n="mode.hard">Schwer</h3>
+                    <p data-i18n="mode.hardDesc">5 Computergegner</p>
+                </div>
+                <div class="mode-card" onclick="game.showCampaignSelection()">
+                    <h3 data-i18n="mode.campaign">Kampagne</h3>
+                    <p data-i18n="mode.campaignDesc">Wähle eine Zivilisation und tritt gegen Computergegner an</p>
+                </div>
+                <div class="mode-card" onclick="game.showArenaSetup()">
+                    <h3 data-i18n="mode.arena">🏟️ Arena</h3>
+                    <p data-i18n="mode.arenaDesc">4 LLM-Gegner kämpfen gegeneinander</p>
+                    <p style="font-size:0.8em; color:#aaa;" data-i18n="mode.arenaSub">Konfiguriere Endpunkte und System Prompts</p>
+                </div>
+            </div>
+            <button class="menu-btn back-btn" onclick="game.showStartScreen()" data-i18n="common.back">Zurück</button>
+        </div>
+    </div>
+
+    <!-- Tutorial Screen -->
+    <div id="tutorialScreen" class="screen">
+        <div class="tutorial-content">
+            <h2 data-i18n="tut.title">📖 Tutorial</h2>
+            <p class="arena-setup-subtitle" data-i18n="tut.subtitle">Alles, was du brauchst — Spielziel, Steuerung, Wirtschaft, Militär und die LLM-Arena.</p>
+
+            <div class="tut-grid">
+                <div class="tut-card">
+                    <h3 data-i18n="tut.goal.h">🎯 Spielziel</h3>
+                    <div data-i18n-html="tut.goal.body"></div>
+                </div>
+                <div class="tut-card">
+                    <h3 data-i18n="tut.controls.h">🖱️ Steuerung</h3>
+                    <div data-i18n-html="tut.controls.body"></div>
+                </div>
+                <div class="tut-card">
+                    <h3 data-i18n="tut.economy.h">🏗️ Wirtschaft & Aufbau</h3>
+                    <div data-i18n-html="tut.economy.body"></div>
+                </div>
+                <div class="tut-card">
+                    <h3 data-i18n="tut.military.h">⚔️ Militär & Kampf</h3>
+                    <div data-i18n-html="tut.military.body"></div>
+                </div>
+                <div class="tut-card">
+                    <h3 data-i18n="tut.wonder.h">🏛️ Weltwunder</h3>
+                    <div data-i18n-html="tut.wonder.body"></div>
+                </div>
+                <div class="tut-card tut-wide">
+                    <h3 data-i18n="tut.models.h">🤖 Arena — Modelle verbinden</h3>
+                    <div data-i18n-html="tut.models.body"></div>
+                </div>
+                <div class="tut-card tut-wide">
+                    <h3 data-i18n="tut.spectate.h">🏟️ Arena — Aufstellung & Zuschauen</h3>
+                    <div data-i18n-html="tut.spectate.body"></div>
+                </div>
+            </div>
+
+            <div class="arena-setup-buttons">
+                <button class="menu-btn" onclick="game.showGameModeSelection()" data-i18n="common.toGame">▶ Zum Spiel</button>
+                <button class="menu-btn back-btn" onclick="game.showStartScreen()" data-i18n="common.back">Zurück</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen">
+        <div id="gameCanvas"></div>
+        
+        <!-- Top HUD -->
+        <div id="topHUD" class="hud">
+            <div class="resource-bar">
+                <span class="resource" id="foodRes">🍖 Nahrung: 200</span>
+                <span class="resource" id="woodRes">🌲 Holz: 200</span>
+                <span class="resource" id="stoneRes">🪨 Stein: 100</span>
+                <span class="resource" id="goldRes">🥇 Gold: 50</span>
+                <span class="population" id="popRes">👥 Bevölkerung: 0/10</span>
+            </div>
+            <div class="hud-right">
+                <div class="age-indicator">
+                    <span id="currentAge">🏺 Altsteinzeit</span>
+                </div>
+                <button class="quit-game-btn" onclick="game.cancelGame()" data-i18n="hud.quit" data-i18n-title="hud.quitTitle" title="Spiel beenden und zum Menü zurück">✕ Menü</button>
+            </div>
+        </div>
+
+        <!-- Bottom HUD -->
+        <div id="bottomHUD" class="hud">
+            <div id="unitInfo" class="unit-info">
+                <p data-i18n="hud.selectHint">Wähle eine Einheit oder ein Gebäude</p>
+            </div>
+            <div id="productionProgressBar" class="progress-bar-container" style="display:none;">
+                <span id="progressText">Produktion: 0%</span>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+            </div>
+            <div id="actionBar" class="action-bar">
+                <button class="action-btn" id="trainBtn" onclick="game.showTrainMenu()" data-i18n="act.train">Ausbilden</button>
+                <button class="action-btn" id="researchBtn" onclick="game.showResearchMenu()" data-i18n="act.research">Forschen</button>
+                <button class="action-btn" id="buildBtn" onclick="game.showBuildMenu()" data-i18n="act.build">Bauen</button>
+                <button class="action-btn" id="upgradeBtn" onclick="game.showUpgradeMenu()" data-i18n="act.upgrade">Aufrüsten</button>
+            </div>
+        </div>
+
+        <!-- Minimap -->
+        <div id="minimap" class="minimap">
+            <canvas id="minimapCanvas"></canvas>
+        </div>
+
+        <!-- Wonder victory countdown (shown while the player holds a finished Wonder) -->
+        <div id="wonderTimer" class="wonder-timer hidden">
+            <div class="wt-title" data-i18n="wt.title">🏛️ WELTWUNDER</div>
+            <div class="wt-clock"><span id="wonderSeconds">180</span><span class="wt-unit" data-i18n="wt.unit">s bis zum SIEG</span></div>
+            <div class="wt-track"><div id="wonderFill" class="wt-fill"></div></div>
+            <div class="wt-hint" data-i18n="wt.hint">⚔️ Beschütze es um jeden Preis!</div>
+        </div>
+
+        <!-- Spectator status bar (shown in arena/spectator mode) -->
+        <div id="spectatorHUD" class="spectator-hud" style="display:none;">
+            <div class="spectator-statusbar">
+                <span class="sb-brand">⚔️ ARENA</span>
+                <span class="sb-sep"></span>
+                <span class="sb-clock" id="arenaClock">00:00</span>
+                <span class="sb-sep"></span>
+                <span class="sb-alive" id="arenaAlive"><b>4</b> / 4</span>
+                <span class="sb-wonder" id="arenaWonder" style="display:none;"></span>
+                <span class="sb-sep"></span>
+                <button class="sb-end" onclick="game.endArenaManually()" data-i18n="spec.evaluate">Auswertung ▸</button>
+                <button class="sb-end sb-quit" onclick="game.cancelGame()" data-i18n="spec.quit" data-i18n-title="spec.quitTitle" title="Arena beenden und zum Menü zurück">✕ Beenden</button>
+            </div>
+        </div>
+
+        <!-- Spectator leaderboard (shown in arena/spectator mode) -->
+        <div id="spectatorLeaderboard" class="spectator-leaderboard" style="display:none;">
+            <div class="lb-header"><span data-i18n="spec.leaderboard">🏆 Rangliste</span><span id="lbCount"></span></div>
+            <div id="spectatorPlayerList" class="lb-list"></div>
+        </div>
+
+        <!-- AI Decision Log (shown in arena/spectator mode) -->
+        <div id="aiDecisionLog" class="ai-decision-log" style="display:none;">
+            <div class="ai-log-header" onclick="game.ui.toggleDecisionLog()">
+                <span><span data-i18n="spec.decisions">📜 KI-Entscheidungen</span> <span class="ai-log-count" id="aiLogCount"></span></span>
+                <span class="ai-log-toggle" id="aiLogToggle">▼</span>
+            </div>
+            <div id="aiLogEntries" class="ai-log-entries"></div>
+            <button id="aiLogTopBtn" class="ai-log-top-btn" title="Scroll to top" onclick="game.ui.scrollDecisionLogTop()">▲</button>
+        </div>
+
+        <!-- Build Menu -->
+        <div id="buildMenu" class="menu-panel hidden">
+            <h3 data-i18n="menu.build">Gebäude bauen</h3>
+            <div id="buildMenuContent" class="menu-content"></div>
+            <button class="close-btn" onclick="game.closeMenus()">✕</button>
+        </div>
+
+        <!-- Train Menu -->
+        <div id="trainMenu" class="menu-panel hidden">
+            <h3 data-i18n="menu.train">Einheiten ausbilden</h3>
+            <div id="trainMenuContent" class="menu-content"></div>
+            <button class="close-btn" onclick="game.closeMenus()">✕</button>
+        </div>
+
+        <!-- Research Menu -->
+        <div id="researchMenu" class="menu-panel hidden">
+            <h3 data-i18n="menu.research">Technologie erforschen</h3>
+            <div id="researchMenuContent" class="menu-content"></div>
+            <button class="close-btn" onclick="game.closeMenus()">✕</button>
+        </div>
+
+        <!-- Upgrade Menu -->
+        <div id="upgradeMenu" class="menu-panel hidden">
+            <h3 data-i18n="menu.upgrade">Aufrüsten</h3>
+            <div id="upgradeMenuContent" class="menu-content"></div>
+            <button class="close-btn" onclick="game.closeMenus()">✕</button>
+        </div>
+
+        <!-- Age Up Menu -->
+        <div id="ageMenu" class="menu-panel hidden">
+            <h3 data-i18n="menu.upgrade">Aufrüsten</h3>
+            <div id="ageMenuContent" class="menu-content"></div>
+            <button class="close-btn" onclick="game.closeMenus()">✕</button>
+        </div>
+    </div>
+
+    <!-- Arena Setup Screen -->
+    <div id="arenaSetupScreen" class="screen">
+        <div class="arena-setup-content">
+            <h2 data-i18n="ar.title">🏟️ Arena — Konfiguration</h2>
+            <p class="arena-setup-subtitle" data-i18n="ar.subtitle">Verbinde beliebig viele Modelle und lass vier davon gegeneinander antreten.</p>
+            <div class="lang-picker lang-picker-inline">
+                <span class="lang-globe">🌐</span>
+                <select class="lang-select" data-i18n-lang onchange="setUiLang(this.value)" aria-label="Language">
+                    <option value="en">English</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                    <option value="zh">中文</option>
+                </select>
+            </div>
+
+            <!-- Section 1: Model library (managed on its own page) -->
+            <div class="arena-section">
+                <div class="arena-section-head">
+                    <span class="arena-step">1</span>
+                    <div>
+                        <h3 data-i18n="ar.step1.h">Modell-Bibliothek</h3>
+                        <p data-i18n="ar.step1.p">Verwalte deine Modell-Verbindungen (Endpoints & Authentifizierung) auf einer eigenen Seite. Sie stehen danach in Schritt 2 zur Auswahl.</p>
+                    </div>
+                </div>
+                <div class="lib-summary">
+                    <span id="libSummaryCount" class="lib-summary-count">0 Modelle konfiguriert</span>
+                    <button class="lib-open-btn" onclick="game.ui.showModelLibrary()" data-i18n="ar.libOpen">📚 Bibliothek verwalten →</button>
+                </div>
+            </div>
+
+            <!-- Section 2: Arena participants -->
+            <div class="arena-section">
+                <div class="arena-section-head">
+                    <span class="arena-step">2</span>
+                    <div>
+                        <h3 data-i18n="ar.step2.h">Arena-Teilnehmer</h3>
+                        <p data-i18n="ar.step2.p">Wähle für jeden der vier Plätze eine Zivilisation und ein Modell (oder die regelbasierte KI).</p>
+                    </div>
+                </div>
+                <div id="arenaSlotsList" class="arena-slots"></div>
+            </div>
+
+            <!-- Section 3: System-prompt template (each LLM slot can override it) -->
+            <div class="arena-section">
+                <div class="arena-section-head">
+                    <span class="arena-step">3</span>
+                    <div>
+                        <h3 data-i18n="ar.step3.h">Standard System-Prompt (Vorlage)</h3>
+                        <p data-i18n="ar.step3.p">Vorlage für neue LLM-Spieler. Jeder Spieler kann darunter (Schritt 2) seinen eigenen Prompt erhalten — z.B. aggressiv für das eine, defensiv für das andere Modell. Platzhalter {{civilization}} und {{bonus}} werden je Volk ersetzt.</p>
+                    </div>
+                </div>
+                <textarea id="arenaSharedPrompt" rows="7" class="arena-prompt-textarea" oninput="game.ui.onTemplatePromptInput(this.value)"></textarea>
+                <button class="hdr-add-btn" style="margin-top:10px" onclick="game.ui.applyTemplateToAllSlots()" data-i18n="ar.applyAll">⇩ Auf alle LLM-Spieler anwenden</button>
+            </div>
+
+            <div class="arena-players-grid" style="display:none;">
+                <!-- Player 1 -->
+                <div class="arena-player-config">
+                    <div class="arena-player-header" style="border-left-color: #e94560;">
+                        <h3>🤖 Spieler 1</h3>
+                    </div>
+                    <div class="arena-player-body">
+                        <div class="arena-field-row">
+                            <div class="arena-field">
+                                <label>Zivilisation</label>
+                                <select id="arenaP1Civ">
+                                    <option value="egyptian">🏛️ Ägypter</option>
+                                    <option value="greek">⚔️ Griechen</option>
+                                    <option value="persian">🏹 Perser</option>
+                                    <option value="yamato">⛩️ Yamato</option>
+                                </select>
+                            </div>
+                            <div class="arena-field">
+                                <label>Steuerung</label>
+                                <select id="arenaP1Type" onchange="game.ui.updateArenaPlayerFields(1)">
+                                    <option value="llm">🧠 LLM (OpenAI Endpoint)</option>
+                                    <option value="ki">🤖 KI (Regelbasiert)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP1LlmFields">
+                            <label>Endpoint URL</label>
+                            <input type="text" id="arenaP1Endpoint" placeholder="http://localhost:11434/v1" />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP1LlmFieldsKey">
+                            <label>API Key (optional)</label>
+                            <input type="text" id="arenaP1ApiKey" placeholder="sk-..." />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP1LlmFieldsPrompt">
+                            <label>System Prompt (bearbeitbar)</label>
+                            <textarea id="arenaP1Prompt" rows="6" class="arena-prompt-textarea"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Player 2 -->
+                <div class="arena-player-config">
+                    <div class="arena-player-header" style="border-left-color: #4ecca3;">
+                        <h3>🤖 Spieler 2</h3>
+                    </div>
+                    <div class="arena-player-body">
+                        <div class="arena-field-row">
+                            <div class="arena-field">
+                                <label>Zivilisation</label>
+                                <select id="arenaP2Civ">
+                                    <option value="egyptian">🏛️ Ägypter</option>
+                                    <option value="greek" selected>⚔️ Griechen</option>
+                                    <option value="persian">🏹 Perser</option>
+                                    <option value="yamato">⛩️ Yamato</option>
+                                </select>
+                            </div>
+                            <div class="arena-field">
+                                <label>Steuerung</label>
+                                <select id="arenaP2Type" onchange="game.ui.updateArenaPlayerFields(2)">
+                                    <option value="llm">🧠 LLM (OpenAI Endpoint)</option>
+                                    <option value="ki">🤖 KI (Regelbasiert)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP2LlmFields">
+                            <label>Endpoint URL</label>
+                            <input type="text" id="arenaP2Endpoint" placeholder="http://localhost:11434/v1" />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP2LlmFieldsKey">
+                            <label>API Key (optional)</label>
+                            <input type="text" id="arenaP2ApiKey" placeholder="sk-..." />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP2LlmFieldsPrompt">
+                            <label>System Prompt (bearbeitbar)</label>
+                            <textarea id="arenaP2Prompt" rows="6" class="arena-prompt-textarea"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Player 3 -->
+                <div class="arena-player-config">
+                    <div class="arena-player-header" style="border-left-color: #f0a500;">
+                        <h3>🤖 Spieler 3</h3>
+                    </div>
+                    <div class="arena-player-body">
+                        <div class="arena-field-row">
+                            <div class="arena-field">
+                                <label>Zivilisation</label>
+                                <select id="arenaP3Civ">
+                                    <option value="egyptian">🏛️ Ägypter</option>
+                                    <option value="greek">⚔️ Griechen</option>
+                                    <option value="persian" selected>🏹 Perser</option>
+                                    <option value="yamato">⛩️ Yamato</option>
+                                </select>
+                            </div>
+                            <div class="arena-field">
+                                <label>Steuerung</label>
+                                <select id="arenaP3Type" onchange="game.ui.updateArenaPlayerFields(3)">
+                                    <option value="llm">🧠 LLM (OpenAI Endpoint)</option>
+                                    <option value="ki">🤖 KI (Regelbasiert)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP3LlmFields">
+                            <label>Endpoint URL</label>
+                            <input type="text" id="arenaP3Endpoint" placeholder="http://localhost:11434/v1" />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP3LlmFieldsKey">
+                            <label>API Key (optional)</label>
+                            <input type="text" id="arenaP3ApiKey" placeholder="sk-..." />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP3LlmFieldsPrompt">
+                            <label>System Prompt (bearbeitbar)</label>
+                            <textarea id="arenaP3Prompt" rows="6" class="arena-prompt-textarea"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Player 4 -->
+                <div class="arena-player-config">
+                    <div class="arena-player-header" style="border-left-color: #0f3460;">
+                        <h3>🤖 Spieler 4</h3>
+                    </div>
+                    <div class="arena-player-body">
+                        <div class="arena-field-row">
+                            <div class="arena-field">
+                                <label>Zivilisation</label>
+                                <select id="arenaP4Civ">
+                                    <option value="egyptian">🏛️ Ägypter</option>
+                                    <option value="greek">⚔️ Griechen</option>
+                                    <option value="persian">🏹 Perser</option>
+                                    <option value="yamato" selected>⛩️ Yamato</option>
+                                </select>
+                            </div>
+                            <div class="arena-field">
+                                <label>Steuerung</label>
+                                <select id="arenaP4Type" onchange="game.ui.updateArenaPlayerFields(4)">
+                                    <option value="llm">🧠 LLM (OpenAI Endpoint)</option>
+                                    <option value="ki">🤖 KI (Regelbasiert)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP4LlmFields">
+                            <label>Endpoint URL</label>
+                            <input type="text" id="arenaP4Endpoint" placeholder="http://localhost:11434/v1" />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP4LlmFieldsKey">
+                            <label>API Key (optional)</label>
+                            <input type="text" id="arenaP4ApiKey" placeholder="sk-..." />
+                        </div>
+                        <div class="arena-field llm-field" id="arenaP4LlmFieldsPrompt">
+                            <label>System Prompt (bearbeitbar)</label>
+                            <textarea id="arenaP4Prompt" rows="6" class="arena-prompt-textarea"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="arena-setup-buttons">
+                <button class="menu-btn" onclick="game.startArenaFromSetup()" data-i18n="ar.start">⚔️ Arena Starten</button>
+                <button class="menu-btn back-btn" onclick="game.ui.resetArenaPrompts()" data-i18n="ar.resetPrompt">↺ Standard-Prompt</button>
+                <button class="menu-btn back-btn" onclick="game.showGameModeSelection()" data-i18n="common.back">Zurück</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Library Screen (managed separately from arena setup) -->
+    <div id="modelLibraryScreen" class="screen">
+        <div class="arena-setup-content">
+            <h2 data-i18n="ar.libTitle">📚 Modell-Bibliothek</h2>
+            <p class="arena-setup-subtitle" data-i18n="ar.libSub">Füge beliebig viele OpenAI-kompatible Modelle hinzu, teste die Verbindung und wähle das Modell. Alle Authentifizierungsarten werden unterstützt.</p>
+            <div class="lang-picker lang-picker-inline">
+                <span class="lang-globe">🌐</span>
+                <select class="lang-select" data-i18n-lang onchange="setUiLang(this.value)" aria-label="Language">
+                    <option value="en">English</option>
+                    <option value="de">Deutsch</option>
+                    <option value="es">Español</option>
+                    <option value="zh">中文</option>
+                </select>
+            </div>
+            <div id="modelLibraryList" class="model-library"></div>
+            <div class="lib-actions">
+                <button class="lib-add-btn" onclick="game.ui.addArenaModel()" data-i18n="ar.addModel">＋ Modell hinzufügen</button>
+                <button class="lib-io-btn" onclick="game.ui.exportModelCatalog()" data-i18n="ar.export">⤓ Exportieren</button>
+                <button class="lib-io-btn" onclick="game.ui.importModelCatalog()" data-i18n="ar.import">⤒ Importieren</button>
+            </div>
+            <p class="auth-hint" data-i18n="ar.ioHint">Sichere deinen Modellkatalog in eine Datei. Achtung: Die Datei enthält API-Schlüssel im Klartext.</p>
+            <div class="arena-setup-buttons">
+                <button class="menu-btn" onclick="game.ui.showArenaSetup()" data-i18n="ar.backToArena">← Zurück zur Arena-Konfiguration</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Victory/Defeat Screen -->
+    <div id="endScreen" class="screen">
+        <div class="end-content">
+            <h1 id="endTitle">SIEG!</h1>
+            <p id="endMessage">Du hast das Spiel gewonnen!</p>
+            <div class="menu-buttons">
+                <button class="menu-btn" onclick="location.reload()" data-i18n="common.mainMenu">Hauptmenü</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Arena Benchmark Summary Screen -->
+    <div id="arenaSummaryScreen" class="screen">
+        <div class="summary-content">
+            <div class="summary-head">
+                <h2 data-i18n="sum.title">🏟️ Arena — Modell-Auswertung</h2>
+                <p class="summary-sub" id="summarySub"></p>
+            </div>
+            <div id="summaryWinner" class="summary-winner"></div>
+            <div id="summaryGrid" class="summary-grid"></div>
+            <p class="summary-legend" id="summaryLegend"></p>
+            <div class="summary-buttons">
+                <button class="menu-btn" onclick="game.showArenaSetup()" data-i18n="sum.newArena">⚔️ Neue Arena</button>
+                <button class="menu-btn back-btn" onclick="location.reload()" data-i18n="sum.mainMenu">Hauptmenü</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/i18n.js?v=145"></script>
+    <script src="js/civilizations.js?v=145"></script>
+    <script src="js/buildings.js?v=145"></script>
+    <script src="js/units.js?v=145"></script>
+    <script src="js/resources.js?v=145"></script>
+    <script src="js/terrain.js?v=145"></script>
+    <script src="js/fogofwar.js?v=145"></script>
+    <script src="js/ai.js?v=145"></script>
+    <script src="js/openai-ai.js?v=145"></script>
+    <script src="js/renderer.js?v=145"></script>
+    <script src="js/input.js?v=145"></script>
+    <script src="js/ui.js?v=145"></script>
+    <script src="js/game.js?v=145"></script>
+</body>
+</html>

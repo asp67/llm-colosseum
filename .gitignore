@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Local Claude / editor config (may contain machine-specific paths & permissions)
+.claude/
+.vscode/
+.idea/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+*.log
+
+# Local dev scratch / notes
+Prompt.txt
+error.md
+
+# Exported model catalogues — these can contain API keys in plain text. NEVER commit.
+llm-colosseum-models.json
+arenaConfig*.json
+*.secrets.json

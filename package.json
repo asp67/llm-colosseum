@@ -1,0 +1,29 @@
+{
+  "name": "llm-colosseum",
+  "version": "1.0.0",
+  "description": "A browser-based Age-of-Empires-style RTS where 4 LLMs battle each other live — a sandbox eval for tool-calling discipline and long-horizon strategic reasoning in an unfamiliar framework.",
+  "homepage": "https://github.com/asp67/llm-colosseum#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asp67/llm-colosseum.git"
+  },
+  "license": "MIT",
+  "author": "asp67",
+  "keywords": [
+    "llm",
+    "eval",
+    "benchmark",
+    "agents",
+    "tool-calling",
+    "rts",
+    "three.js",
+    "arena",
+    "openai",
+    "anthropic",
+    "ollama"
+  ],
+  "scripts": {
+    "start": "npx http-server . -p 8080 -o",
+    "dev": "npx http-server . -p 8080 -c-1 -o"
+  }
+}
