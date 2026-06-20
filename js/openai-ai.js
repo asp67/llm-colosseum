@@ -84,6 +84,18 @@ class OpenAIAIManager {
         return opts.includes(unitType);
     }
 
+    // --- Timing helpers: the model can't see the on-screen progress bars, so we
+    // tell it how long timed actions take and how much is left. ---
+    secsLeft(progress, duration) {
+        return Math.max(0, Math.ceil(((duration || 0) - (progress || 0)) / 1000));
+    }
+    // Seconds for a unit to walk to (tx,tz). Matches the game loop's speed*3 u/s.
+    travelEtaSec(unit, tx, tz) {
+        const sp = (((unit && unit.speed) || 1.0) * 3) || 3;
+        const d = Math.hypot(((unit && unit.x) || 0) - tx, ((unit && unit.z) || 0) - tz);
+        return Math.max(1, Math.round(d / sp));
+    }
+
     // fetch() with an abort timeout so unreachable endpoints fail fast
     async fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
         return OpenAIAIManager.fetchWithTimeout(url, options, timeoutMs);
@@ -510,7 +522,8 @@ class OpenAIAIManager {
             nextEpochCost: nextEpoch ? ageCosts[nextEpoch] : null,
             upgradeInProgress: ai.currentAgeUpgrade ? {
                 targetEpoch: ai.currentAgeUpgrade.targetAge,
-                progressPercent: Math.round((ai.currentAgeUpgrade.progress / ai.currentAgeUpgrade.duration) * 100)
+                progressPercent: Math.round((ai.currentAgeUpgrade.progress / ai.currentAgeUpgrade.duration) * 100),
+                secondsRemaining: this.secsLeft(ai.currentAgeUpgrade.progress, ai.currentAgeUpgrade.duration)
             } : null
         };
 
@@ -575,8 +588,12 @@ class OpenAIAIManager {
                 state: b.underConstruction ? 'under_construction' : 'complete',
                 producing: (b.isProducing && !b.underConstruction) ? b.productionType : null
             };
+            if (b.isProducing && !b.underConstruction) {
+                obj.producingSecondsRemaining = this.secsLeft(b.productionProgress, b.productionDuration);
+            }
             if (b.underConstruction) {
                 obj.buildPct = Math.round(Math.min(1, (b.buildProgress || 0) / (b.buildTime || 10000)) * 100);
+                obj.buildSecondsRemaining = this.secsLeft(b.buildProgress, b.buildTime);
             }
             if (b.isWonder) obj.wonder = true;
             if (b.type === 'farm') {
@@ -655,7 +672,8 @@ class OpenAIAIManager {
         // Current research
         const currentResearch = ai.currentResearch ? {
             techId: ai.currentResearch.techId,
-            progressPercent: Math.round((ai.currentResearch.progress / ai.currentResearch.duration) * 100)
+            progressPercent: Math.round((ai.currentResearch.progress / ai.currentResearch.duration) * 100),
+            secondsRemaining: this.secsLeft(ai.currentResearch.progress, ai.currentResearch.duration)
         } : null;
 
         // Available techs (compact: id, cost, canAfford)
@@ -1072,6 +1090,7 @@ Food (deer, berries, farms) - workers and units. Wood (trees) - buildings. Stone
 - New workers are IDLE until commanded - use harvest_resource (or assign_workers to pull busy workers onto a new job).
 - You cannot exceed your population cap. Build houses when "resources.populationFree" is low — but each house only raises "maxPopulation" up to the HARD CAP "resources.populationHardCap" (100). Once maxPopulation is already at that hard cap, building more houses does NOTHING; the only way to make room is delete_unit (cull weak/idle units to free population for stronger ones).
 - Only attempt actions you can afford (check "resources").
+- TIME PASSES. You cannot see the screen's progress bars, so each action's result tells you how long it takes (e.g. "~5s to produce", "~30s to advance", "~12s to arrive"), and the state reports "secondsRemaining" for research ("research.current"), age-up ("epoch.upgradeInProgress"), unit production ("buildings[].producingSecondsRemaining") and construction ("buildings[].buildSecondsRemaining"). Do NOT re-issue an action that is still in progress — it wastes the turn or thrashes your units. Let scouts/armies travel and timers finish; spend in-progress turns on OTHER useful work (economy, other buildings, planning your attack).
 
 ## Actions (choose ONE per turn)
 - train_worker: train a worker at your Town Center.
@@ -1643,7 +1662,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         tc.productionDuration = 5000;
         tc.productionProgress = 0;
         console.log(`[OpenAIAI] ${ai.id}: Training worker at Town Center`);
-        return `OK - Training worker at Town Center (${Math.floor(ai.resources.food)} food remaining).`;
+        return `OK - Training a worker at the Town Center (~5s to produce; ${Math.floor(ai.resources.food)} food left). The Town Center is busy until it finishes.`;
     }
 
     executeTrainUnit(ai, game, unitType) {
@@ -1725,7 +1744,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         free.productionDuration = 5000;
         free.productionProgress = 0;
         console.log(`[OpenAIAI] ${ai.id}: Training ${unitType} at ${free.name}`);
-        return `OK - Training ${unitType} at ${free.name}.`;
+        return `OK - Training ${unitType} at ${free.name} (~5s to produce; that building is busy until it finishes).`;
     }
 
     executeResearchTech(ai, game, techId) {
@@ -1796,7 +1815,8 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             duration: tech.researchTime || 15000
         };
         console.log(`[OpenAIAI] ${ai.id}: Researching "${tech.name}" (${techId})`);
-        return `OK - Researching "${tech.name}" (${techId}).`;
+        const researchSecs = Math.round((tech.researchTime || 15000) / 1000);
+        return `OK - Researching "${tech.name}" (${techId}) — ~${researchSecs}s to complete. Only one tech at a time; don't re-issue until "research.current" is empty (it shows secondsRemaining).`;
     }
 
     executeUpgradeAge(ai, game) {
@@ -1832,7 +1852,8 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             duration: 30000
         };
         console.log(`[OpenAIAI] ${ai.id}: Upgrading to ${nextAge}`);
-        return `OK - Upgrading to ${nextAge}.`;
+        const ageSecs = Math.round((ai.currentAgeUpgrade.duration || 30000) / 1000);
+        return `OK - Advancing to the ${nextAge} age — ~${ageSecs}s to complete. Keep developing meanwhile; "epoch.upgradeInProgress" shows secondsRemaining, so don't re-issue upgrade_age until it is done.`;
     }
 
     executeBuildStructure(ai, game, buildingType, targetX, targetZ) {
@@ -2008,10 +2029,18 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             return `[ERROR] No military units available to move. Train units first.`;
         }
 
-        // Keep the destination on solid ground (no marching into the ocean).
-        ({ x: targetX, z: targetZ } = game.clampToMap(targetX, targetZ));
+        // Validate the destination so bad coords don't strand units at NaN.
+        const mx = Number(targetX), mz = Number(targetZ);
+        if (!Number.isFinite(mx) || !Number.isFinite(mz)) {
+            return `[ERROR] move_units needs numeric "targetX" and "targetZ" (map coordinates inside map.bounds). Got targetX=${JSON.stringify(targetX)}, targetZ=${JSON.stringify(targetZ)}.`;
+        }
 
+        // Keep the destination on solid ground (no marching into the ocean).
+        ({ x: targetX, z: targetZ } = game.clampToMap(mx, mz));
+
+        let eta = 0;
         unitsToMove.forEach(unit => {
+            eta = Math.max(eta, this.travelEtaSec(unit, targetX, targetZ));
             unit.isMoving = true;
             unit.targetX = targetX;
             unit.targetZ = targetZ;
@@ -2022,7 +2051,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         });
 
         console.log(`[OpenAIAI] ${ai.id}: Moving ${unitsToMove.length} units to (${Math.round(targetX)}, ${Math.round(targetZ)})`);
-        return `OK - Moving ${unitsToMove.length} units to (${Math.round(targetX)}, ${Math.round(targetZ)}).`;
+        return `OK - Moving ${unitsToMove.length} unit(s) to (${Math.round(targetX)}, ${Math.round(targetZ)}) — ~${eta}s to arrive; let them march before re-issuing.`;
     }
 
     executeAttackTarget(ai, game, targetId, unitIds) {
@@ -2143,6 +2172,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
 
         const scout = this.pickScout(ai);
         if (!scout) return `You have no unit free to scout — train a worker first.`;
+        const eta = this.travelEtaSec(scout, tx, tz);
         if (scout.farmRef && scout.farmRef.assignedWorker === scout) scout.farmRef.assignedWorker = null;
         scout.farmRef = null;
         scout.task = scout.type === 'worker' ? 'scouting' : null;
@@ -2154,7 +2184,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         scout.isMoving = true;
         scout.targetX = tx;
         scout.targetZ = tz;
-        return `Sent a scout to explore toward (${Math.round(tx)}, ${Math.round(tz)}) (revealing the map).`;
+        return `Sent a scout to explore toward (${Math.round(tx)}, ${Math.round(tz)}) (~${eta}s to arrive, revealing the map as it goes).`;
     }
 
     executeHarvestResource(ai, game, resourceType) {
@@ -2242,11 +2272,26 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
     }
 
     executeExplore(ai, game, params) {
-        if (params.targetX !== undefined && params.targetZ !== undefined) {
+        // Did the model attempt to specify a target at all?
+        const gaveX = params.targetX !== undefined && params.targetX !== null && params.targetX !== '';
+        const gaveZ = params.targetZ !== undefined && params.targetZ !== null && params.targetZ !== '';
+
+        if (gaveX || gaveZ) {
+            // A target was attempted — it must be BOTH coords and numeric, otherwise
+            // tell the model exactly what went wrong instead of silently mis-scouting
+            // or sending the scout to NaN (which strands it).
+            const tx0 = Number(params.targetX);
+            const tz0 = Number(params.targetZ);
+            if (!gaveX || !gaveZ || !Number.isFinite(tx0) || !Number.isFinite(tz0)) {
+                return `[ERROR] explore needs BOTH numeric "targetX" and "targetZ" (map coordinates inside map.bounds), or omit both to auto-scout the nearest unexplored frontier. Got targetX=${JSON.stringify(params.targetX)}, targetZ=${JSON.stringify(params.targetZ)}.`;
+            }
+
             const scout = this.pickScout(ai);
             if (!scout) return `[ERROR] No unit available to explore. Train a worker first.`;
+
             // Clamp the target so the scout stays on land (no wandering into the ocean).
-            const { x: tx, z: tz } = game.clampToMap(params.targetX, params.targetZ);
+            const { x: tx, z: tz } = game.clampToMap(tx0, tz0);
+            const eta = this.travelEtaSec(scout, tx, tz);
             if (scout.farmRef && scout.farmRef.assignedWorker === scout) scout.farmRef.assignedWorker = null;
             scout.farmRef = null;
             scout.task = scout.type === 'worker' ? 'scouting' : null;
@@ -2258,8 +2303,12 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             scout.isMoving = true;
             scout.targetX = tx;
             scout.targetZ = tz;
-            return `OK - Sent a scout to explore (${Math.round(tx)}, ${Math.round(tz)}).`;
+
+            const clamped = Math.round(tx) !== Math.round(tx0) || Math.round(tz) !== Math.round(tz0);
+            return `OK - Sent a scout to explore (${Math.round(tx)}, ${Math.round(tz)})${clamped ? ' — your target was outside the map and was clamped to the edge' : ''}. It will take ~${eta}s to get there; let it travel before exploring again.`;
         }
+
+        // No target → fan out toward the nearest unexplored frontier.
         const msg = this.dispatchScoutToward(ai, game);
         return msg.startsWith('You have no') ? `[ERROR] ${msg}` : `OK - ${msg}`;
     }
