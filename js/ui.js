@@ -201,6 +201,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             model: opts.model || '',
             provider: opts.provider || 'auto', // auto | openai | anthropic | ollama | google
             maxTokens: opts.maxTokens || '',   // '' = use the default (2000)
+            contextSize: opts.contextSize || '', // Ollama only: num_ctx. '' = default (32768)
             language: opts.language || 'en',   // language the model reasons/answers in (independent of GUI)
             availableModels: [],
             _status: null,
@@ -223,6 +224,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             if (baked) m.name = '';
         }
         if (m.maxTokens == null) m.maxTokens = '';
+        if (m.contextSize == null) m.contextSize = '';
         m.auth = Object.assign({}, def.auth, m.auth || {});
         if (!Array.isArray(m.auth.headers)) m.auth.headers = [];
         // Runtime-only fields must never be restored from storage: a connection's
@@ -495,10 +497,13 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
                     <input type="text" value="${e(m.model)}" oninput="game.ui.setModelField(${m.id},'model',this.value)" placeholder="model-id"></div>
                 <div class="arena-field" style="flex:0 0 150px"><label>${t('ar.fMaxTokens')}</label>
                     <input type="number" min="64" step="64" value="${e(m.maxTokens)}" oninput="game.ui.setModelField(${m.id},'maxTokens',this.value)" placeholder="2000"></div>
+                ${isOllama ? `<div class="arena-field" style="flex:0 0 160px"><label>${t('ar.fContextSize')}</label>
+                    <input type="number" min="512" step="512" value="${e(m.contextSize)}" oninput="game.ui.setModelField(${m.id},'contextSize',this.value)" placeholder="32768"></div>` : ''}
                 <div class="arena-field" style="flex:0 0 170px"><label>${t('ar.fModelLang')}</label>
                     <select onchange="game.ui.setModelField(${m.id},'language',this.value)">${langOpts}</select></div>
             </div>
             <p class="auth-hint">${t('ar.maxTokensHint')}</p>
+            ${isOllama ? `<p class="auth-hint">${t('ar.contextSizeHint')}</p>` : ''}
             <p class="auth-hint">${t('ar.modelLangHint')}</p>
             ${isOllama ? `<p class="auth-hint ollama-hint">${t('ar.ollamaHint')}</p>` : ''}
             </div>
@@ -716,6 +721,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
                     model: (m.model || '').trim(),
                     provider: m.provider || 'auto',
                     maxTokens: (() => { const n = parseInt(m.maxTokens, 10); return (n && n >= 64) ? n : null; })(),
+                    contextSize: (() => { const n = parseInt(m.contextSize, 10); return (n && n >= 512) ? n : null; })(),
                     language: m.language || 'en',
                     auth: this.cleanAuth(m.auth)
                 }

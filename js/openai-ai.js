@@ -210,8 +210,14 @@ class OpenAIAIManager {
                 url: OpenAIAIManager.ollamaRoot(endpoint) + '/api/chat',
                 body: {
                     model, stream: false,
-                    keep_alive: '30m', // keep the model resident between turns (avoid reload latency)
-                    options: { temperature, num_predict: maxTokens },
+                    keep_alive: -1, // never auto-unload: the arena drives the model continuously
+                    // Cap the context to a user-configurable size (default 32768).
+                    // Ollama otherwise loads the model's FULL context (e.g. 128k for
+                    // llama3.2), whose KV cache bloats VRAM and spills the model onto
+                    // the CPU — making every turn crawl and time out. Lower this on
+                    // smaller GPUs; raise it if your game state is large and you have
+                    // the VRAM.
+                    options: { temperature, num_predict: maxTokens, num_ctx: (opts.numCtx && opts.numCtx > 0) ? opts.numCtx : 32768 },
                     messages: [{ role: 'system', content: systemPrompt }, ...turns]
                 }
             };
@@ -235,7 +241,7 @@ class OpenAIAIManager {
         // pointed at :11434 / picked OpenAI-compat), ask it to keep the model
         // resident so it isn't unloaded between turns. Only do this for detected
         // Ollama hosts — real OpenAI (and stricter gateways) reject unknown params.
-        if (OpenAIAIManager.detectProvider(endpoint) === 'ollama') body.keep_alive = '30m';
+        if (OpenAIAIManager.detectProvider(endpoint) === 'ollama') body.keep_alive = -1;
         return {
             url: OpenAIAIManager.stripSlash(endpoint) + '/chat/completions',
             body
@@ -449,6 +455,7 @@ class OpenAIAIManager {
                 model: conn.model || 'default',
                 temperature: 0.7,
                 maxTokens: conn.maxTokens || 2000, // per-model cap on reply length (default 2000)
+                contextSize: conn.contextSize || null, // Ollama num_ctx (null = default 32768)
                 language: conn.language || 'en', // language the model reasons/answers in (independent of GUI)
                 customSystemPrompt: playerSetup.systemPrompt || null
             };
@@ -1188,7 +1195,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
 
             const req = OpenAIAIManager.buildChatRequest(
                 provider, model.endpoint, model.model || 'default', systemPrompt, turns,
-                { temperature: model.temperature, maxTokens: model.maxTokens }
+                { temperature: model.temperature, maxTokens: model.maxTokens, numCtx: model.contextSize }
             );
             const apiUrl = req.url;
             const body = req.body;
@@ -2373,11 +2380,37 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         if (this.aiControllers.length === 0) return;
         const now = Date.now();
 
+        // Continuously record what each model has discovered. Discovery used to be
+        // sampled only at a model's own turn, but the fog reveals as units MOVE — so
+        // a scout could sweep past a node (revealing it on the map) and move on
+        // between turns, leaving the model thinking it never found it. Scan a few
+        // times a second so "seen on the map" always equals "known to the model".
+        this.updateResourceDiscovery(now);
+
         for (const controller of this.aiControllers) {
             if (controller.paused) continue;                                  // spectator paused it
             if (controller.pending) continue;                                 // own pipeline busy
             if (now - controller.lastTurnTime < this.turnInterval) continue;  // small breather
             this.startTurn(controller, now);
+        }
+    }
+
+    // Persistently remember every resource node any of a model's units/buildings
+    // has had within vision range (matches the fog-of-war the spectator sees).
+    updateResourceDiscovery(now) {
+        if (now - (this._lastDiscoveryScan || 0) < 500) return;
+        this._lastDiscoveryScan = now;
+        const resources = (this.game.terrain && this.game.terrain.resources) || [];
+        if (!resources.length) return;
+        for (const controller of this.aiControllers) {
+            const ai = controller.aiPlayer;
+            if (!ai) continue;
+            if (!ai._knownResIdx) ai._knownResIdx = new Set();
+            for (let idx = 0; idx < resources.length; idx++) {
+                if (ai._knownResIdx.has(idx)) continue;        // already known — skip
+                const r = resources[idx];
+                if (this.isPositionVisibleToAI(ai, r.x, r.z, this.game)) ai._knownResIdx.add(idx);
+            }
         }
     }
 
