@@ -18,7 +18,7 @@ class OpenAIAIManager {
                                       // use a smaller/faster model for the real-time arena.
         this.pendingRequests = new Map(); // controllerId -> Promise
         this.decisionLog = []; // Array of { timestamp, playerId, civName, action, reason }
-        this.maxLogEntries = 100;
+        this.maxLogEntries = 400; // keep a deep decision history for the spectator log
         this.modelsLoaded = false; // Prevent double-loading
     }
 
@@ -2169,6 +2169,23 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         return ai.units.find(u => u.type !== 'worker') || null;
     }
 
+    // Strip a unit of its current job (harvesting/farm/combat) so it can cleanly
+    // take a new order. Critically clears isHarvesting + harvest timers — leaving
+    // those set made a pulled worker keep "harvesting" instead of scouting/moving.
+    releaseUnitForOrders(u) {
+        if (!u) return;
+        if (u.farmRef && u.farmRef.assignedWorker === u) u.farmRef.assignedWorker = null;
+        u.farmRef = null;
+        u.harvestTarget = null;
+        u.isHarvesting = false;
+        u.harvestTimer = 0;
+        u.harvestAmount = 0;
+        u.carryingResource = false;
+        u.isAttacking = false;
+        u.attackTarget = null;
+        u.attackMove = null;
+    }
+
     // Send a scout toward an UNEXPLORED frontier to reveal the map. This must NOT
     // peek at hidden resource positions — the AI doesn't know where undiscovered
     // nodes are. We fan out from the base in a new direction each call (golden-angle
@@ -2187,18 +2204,13 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         const scout = this.pickScout(ai);
         if (!scout) return `You have no unit free to scout — train a worker first.`;
         const eta = this.travelEtaSec(scout, tx, tz);
-        if (scout.farmRef && scout.farmRef.assignedWorker === scout) scout.farmRef.assignedWorker = null;
-        scout.farmRef = null;
+        const wasBusy = scout.type === 'worker' && !this.game.isIdleWorker(scout);
+        this.releaseUnitForOrders(scout); // cleanly drop any harvest/farm/combat job
         scout.task = scout.type === 'worker' ? 'scouting' : null;
-        scout.harvestTarget = null;
-        scout.carryingResource = false;
-        scout.isAttacking = false;
-        scout.attackTarget = null;
-        scout.attackMove = null;
         scout.isMoving = true;
         scout.targetX = tx;
         scout.targetZ = tz;
-        return `Sent a scout to explore toward (${Math.round(tx)}, ${Math.round(tz)}) (~${eta}s to arrive, revealing the map as it goes).`;
+        return `Sent a scout to explore toward (${Math.round(tx)}, ${Math.round(tz)}) (~${eta}s to arrive, revealing the map as it goes)${wasBusy ? ' — no worker was idle, so one was pulled off gathering' : ''}.`;
     }
 
     executeHarvestResource(ai, game, resourceType) {
@@ -2303,24 +2315,20 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
 
             const scout = this.pickScout(ai);
             if (!scout) return `[ERROR] No unit available to explore. Train a worker first.`;
+            const wasBusy = scout.type === 'worker' && !this.game.isIdleWorker(scout);
 
             // Clamp the target so the scout stays on land (no wandering into the ocean).
             const { x: tx, z: tz } = game.clampToMap(tx0, tz0);
             const eta = this.travelEtaSec(scout, tx, tz);
-            if (scout.farmRef && scout.farmRef.assignedWorker === scout) scout.farmRef.assignedWorker = null;
-            scout.farmRef = null;
+            this.releaseUnitForOrders(scout); // cleanly drop any harvest/farm/combat job
             scout.task = scout.type === 'worker' ? 'scouting' : null;
-            scout.harvestTarget = null;
-            scout.carryingResource = false;
-            scout.isAttacking = false;
-            scout.attackTarget = null;
-            scout.attackMove = null;
             scout.isMoving = true;
             scout.targetX = tx;
             scout.targetZ = tz;
 
             const clamped = Math.round(tx) !== Math.round(tx0) || Math.round(tz) !== Math.round(tz0);
-            return `OK - Sent a scout to explore (${Math.round(tx)}, ${Math.round(tz)})${clamped ? ' — your target was outside the map and was clamped to the edge' : ''}. It will take ~${eta}s to get there; let it travel before exploring again.`;
+            const pulled = wasBusy ? ' (no worker was idle, so one was pulled off gathering — reassign it to a resource once scouting is done)' : '';
+            return `OK - Sent a scout to explore (${Math.round(tx)}, ${Math.round(tz)})${clamped ? ' — your target was outside the map and was clamped to the edge' : ''}. It will take ~${eta}s to get there; let it travel before exploring again.${pulled}`;
         }
 
         // No target → fan out toward the nearest unexplored frontier.

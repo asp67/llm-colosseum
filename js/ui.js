@@ -1440,12 +1440,17 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             harvest_resource: t('log.harvest_resource'),
             wait: t('log.wait'),
             paused: t('log.paused'),
-            resumed: t('log.resumed')
+            resumed: t('log.resumed'),
+            explore: t('log.explore'),
+            build_wonder: t('log.build_wonder'),
+            assign_workers: t('log.assign_workers'),
+            delete_unit: t('log.delete_unit'),
+            destroy_building: t('log.destroy_building')
         };
 
         let html = '';
         const now = Date.now();
-        log.slice(0, 40).forEach((entry, idx) => {
+        log.slice(0, 160).forEach((entry, idx) => {
             const secondsAgo = Math.floor((now - entry.timestamp) / 1000);
             const timeStr = secondsAgo < 5 ? t('log.now') : `${secondsAgo}s`;
             const civColor = this.legibleColor(entry.color);
@@ -1470,10 +1475,13 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             }
 
             const actionLabel = actionNames[entry.action] || this.escapeHtml(entry.action);
-            const detail = entry.params?.unitType ? ` (${entry.params.unitType})`
-                : entry.params?.buildingType ? ` (${entry.params.buildingType})`
-                : entry.params?.techId ? ` (${entry.params.techId})`
-                : entry.params?.resourceType ? ` (${entry.params.resourceType})`
+            const p = entry.params || {};
+            const hasTarget = p.targetX !== undefined && p.targetZ !== undefined;
+            const detail = p.unitType ? ` (${p.unitType})`
+                : p.buildingType ? ` (${p.buildingType})`
+                : p.techId ? ` (${p.techId})`
+                : p.resourceType ? ` (${p.resourceType})`
+                : hasTarget ? ` (→ ${Math.round(p.targetX)}, ${Math.round(p.targetZ)})`
                 : '';
             const isError = entry.failed || (typeof entry.action === 'string' && (entry.action.includes('failed') || entry.action.includes('⚠')));
 
