@@ -2343,20 +2343,45 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
     }
 
     executeDeleteUnit(ai, game, params) {
-        const type = params.unitType || 'worker';
+        const raw = (params.unitType || 'worker').toString().trim();
+        const type = raw.toLowerCase();
         const count = Math.max(1, Math.min(params.count || 1, 20));
-        // Prefer idle workers when deleting workers, to avoid disrupting jobs.
-        let pool = ai.units.filter(u => u.type === type);
-        if (type === 'worker') {
-            pool.sort((a, b) => (this.game.isIdleWorker(a) ? 0 : 1) - (this.game.isIdleWorker(b) ? 0 : 1));
+
+        // Match on either the unit id ("militia") OR its category ("infantry"),
+        // case-insensitively — the model often passes the category or a label it
+        // saw rather than the exact id.
+        let pool = ai.units.filter(u =>
+            (u.type || '').toLowerCase() === type ||
+            (u.unitType || '').toLowerCase() === type);
+
+        if (pool.length === 0) {
+            // Honest, actionable feedback: tell the model exactly what it owns.
+            const counts = {};
+            ai.units.forEach(u => { counts[u.type] = (counts[u.type] || 0) + 1; });
+            const have = Object.entries(counts).map(([t, n]) => `${t}×${n}`).join(', ') || '(no units)';
+            return `[ERROR] You have no "${raw}" unit to delete. Your units: ${have}. Pass one of those "type" values (the "type" field shown for each unit in "friendlyUnits").`;
         }
-        if (pool.length === 0) return `[ERROR] You have no "${type}" unit to delete.`;
+
+        // Cull the least valuable first: idle workers before working ones, and
+        // otherwise the weakest unit (lowest attack + HP) so you keep your best.
+        pool.sort((a, b) => {
+            if (a.type === 'worker' && b.type === 'worker') {
+                return (this.game.isIdleWorker(a) ? 0 : 1) - (this.game.isIdleWorker(b) ? 0 : 1);
+            }
+            const sa = (a.attack || 0) + (a.maxHealth || 0);
+            const sb = (b.attack || 0) + (b.maxHealth || 0);
+            return sa - sb;
+        });
+
         let removed = 0;
+        const removedTypes = {};
         for (let i = 0; i < pool.length && removed < count; i++) {
+            removedTypes[pool[i].type] = (removedTypes[pool[i].type] || 0) + 1;
             game.deleteOwnUnit(pool[i]);
             removed++;
         }
-        return `OK - Deleted ${removed} ${type}(s), freeing population.`;
+        const what = Object.entries(removedTypes).map(([t, n]) => `${n} ${t}`).join(', ');
+        return `OK - Deleted ${what}, freeing population.`;
     }
 
     executeDestroyBuilding(ai, game, buildingType, targetX, targetZ) {
