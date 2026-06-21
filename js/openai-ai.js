@@ -1851,7 +1851,18 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         const tech = civ?.techTree?.[techId];
         if (!tech) {
             console.log(`[OpenAIAI] ${ai.id}: Unknown tech "${techId}"`);
-            return `[ERROR] Unknown tech "${techId}". Check "research.available" for valid tech IDs.`;
+            const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
+            const nextAge = ageOrder[ageOrder.indexOf(ai.age) + 1] || null;
+            const ageNote = nextAge
+                ? ` To advance to the next age use upgrade_age (NOT research_tech) — your next epoch is "${nextAge}" (see "epoch.nextEpoch"/"epoch.nextEpochCost").`
+                : ` You are already in the final age ("${ai.age}").`;
+            // Age transitions ("NeolithicToBronze", "advance_to_bronze", …) are not
+            // techs. No word boundaries — they don't fire inside camelCase or across "_".
+            const ageLike = /age|epoch|advance|stone|neolithic|bronze|iron/i.test(String(techId));
+            if (ageLike) {
+                return `[ERROR] "${techId}" is not a research tech — advancing AGES is a separate action.${ageNote} For actual technologies, use an exact ID from "research.available".`;
+            }
+            return `[ERROR] Unknown tech "${techId}". Use an exact tech ID from "research.available".${ageNote}`;
         }
 
         if (ai.researchedTechs[techId]) {
