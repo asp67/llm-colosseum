@@ -89,6 +89,7 @@ const I18N = {
         'log.attack_target': '💥 Attack launched', 'log.harvest_resource': '🌾 Resource gathered', 'log.wait': '⏳ Waiting', 'log.advice': '💬 Your advice (queued for the next turn)',
         'log.explore': '🧭 Scout sent', 'log.build_wonder': '🏛️ Wonder started', 'log.assign_workers': '🔁 Workers reassigned', 'log.delete_unit': '🗑️ Unit deleted', 'log.destroy_building': '🧨 Building razed',
         'log.paused': '⏸ Paused by spectator', 'log.resumed': '▶ Resumed by spectator', 'log.defeated': '💀 Defeated — stopped',
+        'diff.easy': '🌞 Summer Valley (Easy)', 'diff.medium': '❄️ Winter Valley (Medium)', 'diff.hard': '🏜️ Desert (Hard)',
         'sum.reason.last_standing': '🏆 Last one standing', 'sum.reason.wonder': '🏛️ Wonder held',
         'sum.reason.manual': '⏹️ Ended manually — highest score', 'sum.reason.mutual_destruction': '💥 Mutual destruction',
         'sum.reason.gameover': '🏁 Game over',
@@ -349,6 +350,7 @@ const I18N = {
         'log.attack_target': '💥 Angriff gestartet', 'log.harvest_resource': '🌾 Ressource gesammelt', 'log.wait': '⏳ Wartet', 'log.advice': '💬 Dein Rat (für den nächsten Zug vorgemerkt)',
         'log.explore': '🧭 Späher entsandt', 'log.build_wonder': '🏛️ Weltwunder begonnen', 'log.assign_workers': '🔁 Arbeiter umverteilt', 'log.delete_unit': '🗑️ Einheit gelöscht', 'log.destroy_building': '🧨 Gebäude abgerissen',
         'log.paused': '⏸ Vom Zuschauer pausiert', 'log.resumed': '▶ Vom Zuschauer fortgesetzt', 'log.defeated': '💀 Besiegt — gestoppt',
+        'diff.easy': '🌞 Sommertal (Leicht)', 'diff.medium': '❄️ Wintertal (Mittel)', 'diff.hard': '🏜️ Wüste (Schwer)',
         'sum.reason.last_standing': '🏆 Letzter Überlebender', 'sum.reason.wonder': '🏛️ Weltwunder gehalten',
         'sum.reason.manual': '⏹️ Manuell beendet — höchste Punktzahl', 'sum.reason.mutual_destruction': '💥 Gegenseitige Vernichtung',
         'sum.reason.gameover': '🏁 Spielende',
@@ -607,6 +609,7 @@ const I18N = {
         'log.attack_target': '💥 Ataque lanzado', 'log.harvest_resource': '🌾 Recurso recolectado', 'log.wait': '⏳ Esperando', 'log.advice': '💬 Tu consejo (en cola para el próximo turno)',
         'log.explore': '🧭 Explorador enviado', 'log.build_wonder': '🏛️ Maravilla iniciada', 'log.assign_workers': '🔁 Obreros reasignados', 'log.delete_unit': '🗑️ Unidad eliminada', 'log.destroy_building': '🧨 Edificio derribado',
         'log.paused': '⏸ Pausado por el espectador', 'log.resumed': '▶ Reanudado por el espectador', 'log.defeated': '💀 Derrotado — detenido',
+        'diff.easy': '🌞 Valle de verano (Fácil)', 'diff.medium': '❄️ Valle de invierno (Medio)', 'diff.hard': '🏜️ Desierto (Difícil)',
         'sum.reason.last_standing': '🏆 Último en pie', 'sum.reason.wonder': '🏛️ Maravilla mantenida',
         'sum.reason.manual': '⏹️ Terminado manualmente — puntuación más alta', 'sum.reason.mutual_destruction': '💥 Destrucción mutua',
         'sum.reason.gameover': '🏁 Fin de la partida',
@@ -857,6 +860,7 @@ const I18N = {
         'log.attack_target': '💥 发起了进攻', 'log.harvest_resource': '🌾 采集了资源', 'log.wait': '⏳ 等待中', 'log.advice': '💬 你的建议（已排入下一回合）',
         'log.explore': '🧭 派出侦察', 'log.build_wonder': '🏛️ 开始建造奇观', 'log.assign_workers': '🔁 重新分配工人', 'log.delete_unit': '🗑️ 删除单位', 'log.destroy_building': '🧨 拆除建筑',
         'log.paused': '⏸ 已被观众暂停', 'log.resumed': '▶ 已被观众恢复', 'log.defeated': '💀 已被击败 — 已停止',
+        'diff.easy': '🌞 夏日山谷（简单）', 'diff.medium': '❄️ 冬日山谷（中等）', 'diff.hard': '🏜️ 沙漠（困难）',
         'sum.reason.last_standing': '🏆 最后的幸存者', 'sum.reason.wonder': '🏛️ 守住了世界奇观',
         'sum.reason.manual': '⏹️ 手动结束——最高分', 'sum.reason.mutual_destruction': '💥 同归于尽',
         'sum.reason.gameover': '🏁 游戏结束',
@@ -1252,6 +1256,18 @@ function applyI18n(root) {
     root.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.getAttribute('data-i18n-title'))); });
     // Keep any GUI language <select> in sync with the active language.
     root.querySelectorAll('[data-i18n-lang]').forEach(el => { el.value = _uiLang; });
+    // Keep any difficulty <select> in sync with the saved difficulty.
+    root.querySelectorAll('[data-i18n-diff]').forEach(el => { el.value = _difficulty; });
+}
+
+// --- Difficulty (Summer Valley / Winter Valley / Desert) — global UI setting ---
+let _difficulty = 'easy';
+try { const d = localStorage.getItem('difficulty'); if (d === 'easy' || d === 'medium' || d === 'hard') _difficulty = d; } catch (e) {}
+function getDifficulty() { return _difficulty; }
+function setDifficulty(d) {
+    if (d !== 'easy' && d !== 'medium' && d !== 'hard') return;
+    _difficulty = d;
+    try { localStorage.setItem('difficulty', d); } catch (e) {}
 }
 
 if (typeof window !== 'undefined') {
@@ -1260,6 +1276,8 @@ if (typeof window !== 'undefined') {
     window.applyI18n = applyI18n;
     window.setUiLang = setUiLang;
     window.getUiLang = getUiLang;
+    window.setDifficulty = setDifficulty;
+    window.getDifficulty = getDifficulty;
     window.I18N_LANGS = I18N_LANGS;
     window.I18N_MODEL_LANG_NAME = I18N_MODEL_LANG_NAME;
     document.addEventListener('DOMContentLoaded', () => {

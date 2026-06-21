@@ -182,6 +182,13 @@ class Game {
             });
         }
 
+        // Regenerate the map FIRST (with the chosen difficulty) so resource counts
+        // reflect it and the per-TC clearResourcesNear below acts on fresh nodes.
+        this.difficulty = (typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || 'easy';
+        this.terrain.difficulty = this.difficulty;
+        this.terrain.generateTerrain();
+        this.renderer.setTerrain(this.terrain);
+
         // Create AI players based on setup
         this.aiManager.aiPlayers = [];
         for (let i = 0; i < 4; i++) {
@@ -227,10 +234,6 @@ class Game {
                 this.aiManager.markAsOpenAIControlled(ai.id);
             }
         }
-
-        // Setup terrain
-        this.terrain.generateTerrain();
-        this.renderer.setTerrain(this.terrain);
 
         // Setup fog of war (natural fog for spectator mode, entities always visible)
         if (this.fogOfWar) this.fogOfWar.destroy(); // drop the previous game's fog overlay
@@ -322,6 +325,13 @@ class Game {
                 z: Math.sin(angle) * radius
             });
         }
+
+        // Regenerate the map with the chosen difficulty (fresh resources each game,
+        // scaled by difficulty) before placing Town Centers / clearing nodes under them.
+        this.difficulty = (typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || 'easy';
+        this.terrain.difficulty = this.difficulty;
+        this.terrain.generateTerrain();
+        this.renderer.setTerrain(this.terrain);
 
         // In standard mode, create player town center at first spawn position
         if (!this.spectatorMode) {

@@ -1,4 +1,14 @@
 // Terrain and map generation
+// Difficulty presets: resource-count multipliers + a ground colour theme.
+//   easy   = Summer Valley (full resources, lush green)
+//   medium = Winter Valley (-50% food, pale wintry ground)
+//   hard   = Desert        (-75% food, -75% wood, -50% stone, sandy ground)
+const DIFFICULTY_MODS = {
+    easy:   { food: 1.0,  wood: 1.0,  stone: 1.0, base: 0x79b94a, dry: 0xb2bd66 },
+    medium: { food: 0.5,  wood: 1.0,  stone: 1.0, base: 0x9db9b3, dry: 0xcdd6d2 },
+    hard:   { food: 0.25, wood: 0.25, stone: 0.5, base: 0xcdb886, dry: 0xc2a868 }
+};
+
 class TerrainManager {
     constructor(scene, size = 200) {
         this.scene = scene;
@@ -7,8 +17,11 @@ class TerrainManager {
         this.gridSize = 2;
         this.numTiles = size / this.gridSize;
         this.resources = [];
+        this.difficulty = 'easy'; // set by the game before each regenerate
         this.generateTerrain();
     }
+
+    diffMods() { return DIFFICULTY_MODS[this.difficulty] || DIFFICULTY_MODS.easy; }
 
     generateTerrain() {
         // Idempotent: clear any terrain from a previous call (constructor + game both call this)
@@ -25,8 +38,9 @@ class TerrainManager {
         const seg = Math.min(140, Math.max(48, Math.floor(this.size / 7)));
         const geometry = new THREE.PlaneGeometry(this.size, this.size, seg, seg);
         const pos = geometry.attributes.position;
-        const base = new THREE.Color(0x79b94a);   // lush green grass
-        const dryC = new THREE.Color(0xb2bd66);    // subtle dry-grass tint
+        const mods = this.diffMods();
+        const base = new THREE.Color(mods.base);   // ground colour (theme per difficulty)
+        const dryC = new THREE.Color(mods.dry);    // subtle dry-patch tint
         const sandC = new THREE.Color(0xcbb784);   // beach sand
         const tmp = new THREE.Color();
         const colors = [];
@@ -98,9 +112,10 @@ class TerrainManager {
     }
 
     generateResources() {
-        // Food (animals): 272 total (~50% more than the old 180), spread EVENLY
-        // across the 4 player areas (68 each) but placed randomly within each wedge.
-        const perArea = 68;
+        // Food (animals): 272 total at full strength (68 each), spread EVENLY across
+        // the 4 player areas but placed randomly within each wedge. Scaled by the
+        // difficulty's food multiplier (Winter -50%, Desert -75%).
+        const perArea = Math.max(1, Math.round(68 * this.diffMods().food));
         for (let area = 0; area < 4; area++) {
             for (let i = 0; i < perArea; i++) {
                 const { x, z } = this.randomPosInArea(area);
@@ -140,9 +155,10 @@ class TerrainManager {
     }
 
     generateTrees() {
-        // Wood (trees): 640 total, spread EVENLY across the 4 player areas (160
-        // each) but placed randomly within each area's wedge.
-        const perArea = 160;
+        // Wood (trees): 640 total at full strength (160 each), spread EVENLY across
+        // the 4 player areas but placed randomly within each wedge. Scaled by the
+        // difficulty's wood multiplier (Desert -75%).
+        const perArea = Math.max(1, Math.round(160 * this.diffMods().wood));
         for (let area = 0; area < 4; area++) {
           for (let t = 0; t < perArea; t++) {
             const { x, z } = this.randomPosInArea(area);
@@ -178,7 +194,8 @@ class TerrainManager {
     }
 
     generateStones() {
-        for (let i = 0; i < 40; i++) {
+        const count = Math.max(1, Math.round(40 * this.diffMods().stone)); // Desert -50%
+        for (let i = 0; i < count; i++) {
             const x = (Math.random() - 0.5) * (this.size - 20);
             const z = (Math.random() - 0.5) * (this.size - 20);
             
