@@ -628,22 +628,29 @@ class OpenAIAIManager {
             return obj;
         });
 
-        // Enemy buildings (very compact: just type + position). A WONDER is an
-        // existential threat, so it is ALWAYS revealed to everyone (ignores fog).
+        // Enemy buildings (compact: type + position). Buildings are static, so once
+        // DISCOVERED they are remembered (ai._knownEnemyBuildings) and stay listed
+        // even after your units look away — with "visible:false" marking a remembered
+        // (last-seen) one vs a currently-in-sight "visible:true". A WONDER is an
+        // existential threat and is ALWAYS revealed to everyone (ignores fog).
+        if (!ai._knownEnemyBuildings) ai._knownEnemyBuildings = new Set();
         const enemyBuildings = [];
         const enemyWonders = [];
         const required = (game.wonderRequired || 240);
         game.getAllBuildings().forEach(bldg => {
             if (ai.buildings.includes(bldg)) return;
+            if (bldg.health <= 0) { ai._knownEnemyBuildings.delete(bldg); return; } // destroyed
             const isWonder = bldg.isWonder;
-            const vis = isWonder || this.isPositionVisibleToAI(ai, bldg.x, bldg.z, game);
-            if (!vis) return;
+            const seenNow = isWonder || this.isPositionVisibleToAI(ai, bldg.x, bldg.z, game);
+            if (seenNow) ai._knownEnemyBuildings.add(bldg);          // discover/refresh
+            if (!seenNow && !ai._knownEnemyBuildings.has(bldg)) return; // never discovered → hidden
             const entry = {
                 type: bldg.type,
                 x: Math.round(bldg.x),
                 z: Math.round(bldg.z),
                 owner: bldg.owner,
-                healthPct: Math.round((bldg.health / bldg.maxHealth) * 100)
+                healthPct: Math.round((bldg.health / bldg.maxHealth) * 100),
+                visible: !!seenNow
             };
             if (isWonder) {
                 entry.isWonder = true;
@@ -1118,6 +1125,7 @@ Food (deer, berries, farms) - workers and units. Wood (trees) - buildings. Stone
 - The whole world is "map.size" units wide, spanning "map.bounds" (minX/maxX/minZ/maxZ) centred on (0,0). Enemies can be ANYWHERE in those bounds — scout across the full map (far corners, the opposite side from your spawn), not just near home. Send explore/move targets toward unseen regions inside the bounds.
 - WHERE YOUR RIVALS ARE: all 4 players start EVENLY SPACED as far apart as possible — each near the middle of one map edge (north / east / south / west), about 90° apart around the centre (0,0) and roughly 300 units out. You are at "map.yourSpawnArea"; figure out which edge that is, and your 3 rivals hold the OTHER three edge-midpoints — i.e. across the centre from you and to your left and right, NEVER beside your own base. So to find and attack them, send scouts through the centre and toward the opposite and perpendicular edges. If your scouts only circle your home region you will never meet the enemy and the match stalls.
 - To find more resources or the enemy, use explore (or move a unit into the dark). If you harvest_resource a type you have not discovered yet, a scout is sent automatically — try again once it appears in "resourcesOnMap".
+- "enemyBuildings" REMEMBERS every enemy building you have ever discovered (buildings don't move): each has "visible":true if a unit can see it right now, or "visible":false if it is a remembered last-seen location — both are valid attack targets. "enemyUnits" is different: it shows only enemy units CURRENTLY in your sight (they move, so old positions aren't kept).
 - explore automatically uses your best available scout: an idle MILITARY unit if you have one (cavalry first — it is fast and sees farther), and only a worker if no military is free. Military scouts cost you no economy, so keeping a spare cavalry/scout_cavalry for exploration is strong; a worker sent to scout is one fewer worker gathering.
 
 ## Mechanics you MUST respect
@@ -2726,6 +2734,13 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
     // it is currently visible — EXCEPT enemy wonders, which are always revealed
     // to everyone, so a known wonder counts even with zero scouting.
     hasVisibleEnemies(ai, game) {
+        // Remembered enemy buildings (discovered earlier, still alive) are valid
+        // targets even when not currently in sight.
+        if (ai._knownEnemyBuildings) {
+            for (const b of ai._knownEnemyBuildings) {
+                if (b && b.health > 0 && !this.isOwnedByAI(b, ai)) return true;
+            }
+        }
         for (const b of game.getAllBuildings()) {
             if (this.isOwnedByAI(b, ai)) continue;
             if (b.health <= 0) continue;
@@ -2769,6 +2784,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         if (this._stopped) return; // match ended/restarted — issue no more turns
 
         this.updateResourceDiscovery(now);
+        this.updateEnemyBuildingDiscovery();
         this.updateAttackReports(now);
 
         for (const controller of this.aiControllers) {
@@ -2851,6 +2867,28 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
                 if (ai._knownResIdx.has(idx)) continue;        // already known — skip
                 const r = resources[idx];
                 if (this.isPositionVisibleToAI(ai, r.x, r.z, this.game)) ai._knownResIdx.add(idx);
+            }
+        }
+    }
+
+    // Persistently remember every ENEMY BUILDING a model has seen (buildings are
+    // static, so a discovered base should stay known even after your units look
+    // away — just like resources). Enemy UNITS are deliberately NOT remembered:
+    // they move, so a stale position would mislead. Runs every frame; drops a
+    // remembered building once it is destroyed/removed.
+    updateEnemyBuildingDiscovery() {
+        const all = this.game.getAllBuildings();
+        for (const controller of this.aiControllers) {
+            const ai = controller.aiPlayer;
+            if (!ai) continue;
+            if (!ai._knownEnemyBuildings) ai._knownEnemyBuildings = new Set();
+            for (const b of all) {
+                if (ai.buildings.includes(b)) continue;            // own building
+                if (b.health <= 0) { ai._knownEnemyBuildings.delete(b); continue; } // gone
+                if (ai._knownEnemyBuildings.has(b)) continue;      // already known
+                if (b.isWonder || this.isPositionVisibleToAI(ai, b.x, b.z, this.game)) {
+                    ai._knownEnemyBuildings.add(b);
+                }
             }
         }
     }
