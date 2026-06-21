@@ -2253,9 +2253,13 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         return out;
     }
 
-    // True if a unit is committed to a fight (so we must NOT pull it off to scout).
+    // True only if a unit is ACTIVELY fighting a live target (so we must not pull it
+    // off to scout). A unit merely marching to a stale attack-move objective — no
+    // living target — is NOT fighting and may be redirected; otherwise a cavalry
+    // with a leftover attack flag was skipped and explore silently picked a worker,
+    // leaving the cavalry standing still while move_units (no such filter) worked.
     isInCombat(u) {
-        return !!(u && (u.isAttacking || u.attackTarget || u.attackMove));
+        return !!(u && u.isAttacking && u.attackTarget && u.attackTarget.health > 0);
     }
 
     // Pick the best scout. A free MILITARY unit is the right scout — it doesn't cost
@@ -2273,15 +2277,17 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
     pickScout(ai, preferredType = null) {
         if (preferredType) {
             const pt = String(preferredType).trim().toLowerCase();
-            const matches = ai.units.filter(u => !this.isInCombat(u) &&
-                ((u.type || '').toLowerCase() === pt || (u.unitType || '').toLowerCase() === pt));
-            if (matches.length) {
-                // Prefer a genuinely idle one (so we don't pull a working worker if a
-                // free one of the same type exists), else any non-combat match.
-                const idle = matches.find(u => u.type === 'worker' ? this.game.isIdleWorker(u) : !u.isMoving);
-                return idle || matches[0];
+            const ofType = ai.units.filter(u =>
+                (u.type || '').toLowerCase() === pt || (u.unitType || '').toLowerCase() === pt);
+            if (ofType.length) {
+                // The model explicitly named this unit, so honor it even if it is
+                // fighting — but still prefer a non-fighting one of that type first.
+                const free = ofType.filter(u => !this.isInCombat(u));
+                const pool = free.length ? free : ofType;
+                const idle = pool.find(u => u.type === 'worker' ? this.game.isIdleWorker(u) : !u.isMoving);
+                return idle || pool[0];
             }
-            // requested type isn't free → fall through to the automatic pick
+            // requested type isn't present → fall through to the automatic pick
         }
 
         const idleMilitary = ai.units.filter(u => u.type !== 'worker' && !this.isInCombat(u));
