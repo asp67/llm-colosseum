@@ -269,6 +269,10 @@ const I18N = {
         // Benchmark summary
         'sum.title': '🏟️ Arena — Model evaluation',
         'sum.newArena': '⚔️ New arena',
+        'sum.saveResults': '💾 Save results',
+        'sum.saveDone': 'Results saved to file',
+        'sum.saveFailed': 'Could not save results',
+        'sum.saveNoData': 'No results to save yet',
         'sum.mainMenu': 'Main menu'
     },
 
@@ -523,6 +527,10 @@ const I18N = {
 
         'sum.title': '🏟️ Arena — Modell-Auswertung',
         'sum.newArena': '⚔️ Neue Arena',
+        'sum.saveResults': '💾 Ergebnisse speichern',
+        'sum.saveDone': 'Ergebnisse in Datei gespeichert',
+        'sum.saveFailed': 'Ergebnisse konnten nicht gespeichert werden',
+        'sum.saveNoData': 'Noch keine Ergebnisse zum Speichern',
         'sum.mainMenu': 'Hauptmenü'
     },
 
@@ -769,6 +777,10 @@ const I18N = {
 
         'sum.title': '🏟️ Arena — Evaluación de modelos',
         'sum.newArena': '⚔️ Nueva arena',
+        'sum.saveResults': '💾 Guardar resultados',
+        'sum.saveDone': 'Resultados guardados en archivo',
+        'sum.saveFailed': 'No se pudieron guardar los resultados',
+        'sum.saveNoData': 'Aún no hay resultados para guardar',
         'sum.mainMenu': 'Menú principal'
     },
 
@@ -1023,6 +1035,10 @@ const I18N = {
 
         'sum.title': '🏟️ 竞技场 — 模型评估',
         'sum.newArena': '⚔️ 新竞技场',
+        'sum.saveResults': '💾 保存结果',
+        'sum.saveDone': '结果已保存到文件',
+        'sum.saveFailed': '无法保存结果',
+        'sum.saveNoData': '暂无可保存的结果',
         'sum.mainMenu': '主菜单'
     }
 };
