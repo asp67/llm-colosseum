@@ -214,7 +214,9 @@ class Game {
             }
         }
 
-        // Setup OpenAI controllers for LLM players
+        // Setup OpenAI controllers for LLM players. Stop any prior manager first so
+        // a previous match's in-flight requests can't bleed into this one.
+        if (this.openAIAIManager) this.openAIAIManager.stop();
         this.openAIAIManager = new OpenAIAIManager(this);
         await this.openAIAIManager.initFromSetup(setup);
 
@@ -377,7 +379,9 @@ class Game {
             }
         }
 
-        // Initialize OpenAI-powered AI controllers for all AI players (async)
+        // Initialize OpenAI-powered AI controllers for all AI players (async).
+        // Stop any prior manager first so an old match's requests don't bleed in.
+        if (this.openAIAIManager) this.openAIAIManager.stop();
         this.openAIAIManager = new OpenAIAIManager(this);
         this.openAIAIManager.initAndAssign().then(() => {
             console.log('[Game] OpenAI AI controllers ready');
@@ -2653,6 +2657,9 @@ class Game {
     endArena(winnerAi, reason) {
         if (!this.gameStarted) return; // guard against double-trigger
         this.gameStarted = false;
+        // Halt the LLM pipeline so finished-match requests stop spending quota and
+        // can't spawn late units into the scene behind the summary.
+        if (this.openAIAIManager) this.openAIAIManager.stop();
         if (this.ui.teardownSpectatorUI) this.ui.teardownSpectatorUI();
         this.ui.showArenaSummary(winnerAi, reason);
     }

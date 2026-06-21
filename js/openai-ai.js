@@ -17,6 +17,9 @@ class OpenAIAIManager {
                                       // reasoning models on modest hardware may still exceed it —
                                       // use a smaller/faster model for the real-time arena.
         this.pendingRequests = new Map(); // controllerId -> Promise
+        this._stopped = false; // set true when the match ends/restarts: aborts in-flight
+                               // requests and makes any late resolution a no-op, so the
+                               // previous match's models can't mutate the next one.
         this.decisionLog = []; // Array of { timestamp, playerId, civName, action, reason }
         this.maxLogEntries = 400; // keep a deep decision history for the spectator log
         this.historyLength = 20; // recent moves replayed to each model every turn, so it can
@@ -1249,8 +1252,10 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             const reqStart = Date.now();
 
             // Abort the request if the endpoint is slow/dead so the controller
-            // never gets stuck "pending" for the rest of the match.
+            // never gets stuck "pending" for the rest of the match. The handle is
+            // stored on the controller so stop() can abort it when the match ends.
             const controllerAbort = new AbortController();
+            controller._abort = controllerAbort;
             const timeoutId = setTimeout(() => controllerAbort.abort(), this.requestTimeout);
             let response;
             try {
@@ -2598,6 +2603,8 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         // a scout could sweep past a node (revealing it on the map) and move on
         // between turns, leaving the model thinking it never found it. Scan a few
         // times a second so "seen on the map" always equals "known to the model".
+        if (this._stopped) return; // match ended/restarted — issue no more turns
+
         this.updateResourceDiscovery(now);
 
         for (const controller of this.aiControllers) {
@@ -2606,6 +2613,19 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             if (now - controller.lastTurnTime < this.turnInterval) continue;  // small breather
             this.startTurn(controller, now);
         }
+    }
+
+    // Halt this manager for good: abort in-flight requests and make any late
+    // resolution a no-op. Called when a match ends or a new one starts, so the
+    // previous match's slow requests can't spend more quota or spawn stray units
+    // into the next match's shared scene.
+    stop() {
+        this._stopped = true;
+        for (const c of this.aiControllers) {
+            try { if (c._abort) c._abort.abort(); } catch (e) { /* already settled */ }
+            c.pending = false;
+        }
+        this.pendingRequests.clear();
     }
 
     // Persistently remember every resource node any of a model's units/buildings
@@ -2705,6 +2725,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
 
         const promise = this.sendToOpenAI(controller, gameState)
             .then(actionData => {
+                if (this._stopped) return; // match ended while this was in flight — drop it
                 if (actionData) {
                     this.executeAction(controller, actionData);
                 } else {
