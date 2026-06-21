@@ -2744,11 +2744,46 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         this.updateAttackReports(now);
 
         for (const controller of this.aiControllers) {
+            if (this.isControllerDefeated(controller)) {                       // lost its last Town Center
+                if (!controller.defeated) this.markDefeated(controller);       // stop it (once)
+                continue;
+            }
             if (controller.paused) continue;                                  // spectator paused it
             if (controller.pending) continue;                                 // own pipeline busy
             if (now - controller.lastTurnTime < this.turnInterval) continue;  // small breather
             this.startTurn(controller, now);
         }
+    }
+
+    // A player is truly defeated only when it has NO units AND NO buildings left:
+    // as long as a single unit survives it could rebuild (e.g. a worker putting up a
+    // new Town Center), so losing only the Town Center is not elimination. A wiped-
+    // out model must stop sending requests — it can do nothing and cannot recover.
+    isControllerDefeated(controller) {
+        const ai = controller && controller.aiPlayer;
+        return !ai || (ai.units.length === 0 && ai.buildings.length === 0);
+    }
+
+    // Permanently retire a defeated controller: abort its in-flight request, mark it
+    // so any late resolution is dropped, and note it once in the spectator log.
+    markDefeated(controller) {
+        controller.defeated = true;
+        try { if (controller._abort) controller._abort.abort(); } catch (e) { /* already settled */ }
+        controller.pending = false;
+        controller.pendingAttackReports = [];
+        controller.pendingArrivalMessages = [];
+        const ai = controller.aiPlayer;
+        if (ai) {
+            const civ = getCivilization(ai.civilization);
+            this.decisionLog.unshift({
+                timestamp: Date.now(), playerId: ai.id,
+                civName: civ?.name || ai.civilization,
+                color: '#' + ((civ?.color ?? 0xffffff)).toString(16).padStart(6, '0'),
+                action: 'defeated', reason: '', params: {}, failed: true, error: null, isControl: true
+            });
+            if (this.decisionLog.length > this.maxLogEntries) this.decisionLog = this.decisionLog.slice(0, this.maxLogEntries);
+        }
+        console.log(`[OpenAIAI] ${controller.id} defeated — controller stopped.`);
     }
 
     // Halt this manager for good: abort in-flight requests and make any late
@@ -2863,7 +2898,7 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
 
         const promise = this.sendToOpenAI(controller, gameState)
             .then(actionData => {
-                if (this._stopped) return; // match ended while this was in flight — drop it
+                if (this._stopped || controller.defeated) return; // ended or defeated mid-flight — drop it
                 if (actionData) {
                     this.executeAction(controller, actionData);
                 } else {

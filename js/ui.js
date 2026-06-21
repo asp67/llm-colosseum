@@ -1440,6 +1440,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             wait: t('log.wait'),
             paused: t('log.paused'),
             resumed: t('log.resumed'),
+            defeated: t('log.defeated'),
             explore: t('log.explore'),
             build_wonder: t('log.build_wonder'),
             assign_workers: t('log.assign_workers'),
