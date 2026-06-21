@@ -24,6 +24,8 @@ class InputManager {
         canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        // Release the spectator coordinate flag even if the mouse comes up off-canvas.
+        window.addEventListener('mouseup', () => this.hideCoordFlag());
 
         // Touch support
         canvas.addEventListener('touchstart', (e) => {
@@ -44,8 +46,13 @@ class InputManager {
 
     onMouseDown(event) {
         // Spectator/arena: no unit selection or commands — don't start a drag-select
-        // (camera pan/rotate/zoom is handled separately by the renderer).
-        if (this.game.spectatorMode) return;
+        // (camera pan/rotate/zoom is handled separately by the renderer). Right-click,
+        // though, drops a coordinate flag so the spectator can read off map positions
+        // (handy for giving models coordinate-based advice). Held until release.
+        if (this.game.spectatorMode) {
+            if (event.button === 2) this.showCoordFlag(event.clientX, event.clientY);
+            return;
+        }
         // Skip middle-mouse-button - let Renderer handle camera rotation
         if (event.button === 1) return;
 
@@ -70,7 +77,34 @@ class InputManager {
         }
     }
 
+    // Spectator helper: a small flag near the cursor showing the world (x, z) under
+    // it, shown while right-click is held so the spectator can read map coordinates.
+    showCoordFlag(clientX, clientY) {
+        if (!this._coordFlag) {
+            const el = document.createElement('div');
+            el.className = 'coord-flag';
+            el.style.display = 'none';
+            document.body.appendChild(el);
+            this._coordFlag = el;
+        }
+        const flag = this._coordFlag;
+        const world = this.renderer.getWorldPositionFromScreen(clientX, clientY);
+        flag.textContent = world ? `🚩 ${Math.round(world.x)}, ${Math.round(world.z)}` : '🚩 off map';
+        flag.style.left = (clientX + 14) + 'px';
+        flag.style.top = (clientY - 12) + 'px';
+        flag.style.display = 'block';
+    }
+
+    hideCoordFlag() {
+        if (this._coordFlag) this._coordFlag.style.display = 'none';
+    }
+
     onMouseMove(event) {
+        // While the spectator holds right-click, keep the coordinate flag under the cursor.
+        if (this._coordFlag && this._coordFlag.style.display !== 'none') {
+            this.showCoordFlag(event.clientX, event.clientY);
+        }
+
         const rect = this.renderer.renderer.domElement.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;

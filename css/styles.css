@@ -904,6 +904,22 @@ body.spectator-mode .spectator-leaderboard { max-height: calc(100vh - 262px); }
     border-left: 2px solid rgba(255, 255, 255, 0.08);
 }
 
+/* Spectator right-click coordinate flag (follows the cursor while held). */
+.coord-flag {
+    position: fixed;
+    z-index: 2000;
+    pointer-events: none;
+    transform: translateY(-100%);
+    background: rgba(15, 20, 30, 0.92);
+    color: #e9eef7;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font: 600 13px/1.2 monospace;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
 /* Rejected-action marker + reason in the decision log */
 .ai-log-entry .log-x {
     color: #ff8597;
