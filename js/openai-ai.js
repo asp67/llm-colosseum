@@ -417,6 +417,8 @@ class OpenAIAIManager {
                 conversationHistory: [], // Stores {action, result} for feedback loop
                 lastActionResult: null, // Most recent action result for next turn
                 pendingAdvice: [], // Spectator advice to inject into the next prompt
+                objective: '', // Model-authored standing goal ("why"), persists until it changes it
+                plan: [], // Model-authored short ordered sub-goals, persists until rewritten
                 stats: this.newStats() // Behavior/performance metrics for the summary
             };
 
@@ -490,6 +492,8 @@ class OpenAIAIManager {
                 conversationHistory: [], // Stores {action, result} for feedback loop
                 lastActionResult: null, // Most recent action result for next turn
                 pendingAdvice: [], // Spectator advice to inject into the next prompt
+                objective: '', // Model-authored standing goal ("why"), persists until it changes it
+                plan: [], // Model-authored short ordered sub-goals, persists until rewritten
                 stats: this.newStats() // Behavior/performance metrics for the summary
             };
 
@@ -1019,6 +1023,15 @@ class OpenAIAIManager {
                                 reason: {
                                     type: 'string',
                                     description: 'Brief explanation of why this action was chosen.'
+                                },
+                                objective: {
+                                    type: 'string',
+                                    description: 'OPTIONAL. Your overall standing goal and WHY (e.g. "Beat red player militarily — they are weakest"). It PERSISTS across turns until you change it, so you do not forget your plan. Include it on any action to set or update it; omit it to leave it unchanged.'
+                                },
+                                plan: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'OPTIONAL. Up to 5 short ordered next-steps toward your objective (e.g. ["scout red base","mass 6 cavalry","attack their TC"]). It PERSISTS until you rewrite it — use it to keep sub-goals alive across turns (a scout you sent, a resource you still need). Rewrite the whole list to update; mark progress in the text ("scouting red — in progress").'
                                 }
                             },
                             required: ['reason']
@@ -1104,6 +1117,11 @@ Food (deer, berries, farms) - workers and units. Wood (trees) - buildings. Stone
 - Only attempt actions you can afford (check "resources").
 - TIME PASSES. You cannot see the screen's progress bars, so each action's result tells you how long it takes (e.g. "~5s to produce", "~30s to advance", "~12s to arrive"), and the state reports "secondsRemaining" for research ("research.current"), age-up ("epoch.upgradeInProgress"), unit production ("buildings[].producingSecondsRemaining") and construction ("buildings[].buildSecondsRemaining"). Do NOT re-issue an action that is still in progress — it wastes the turn or thrashes your units. Let scouts/armies travel and timers finish; spend in-progress turns on OTHER useful work (economy, other buildings, planning your attack).
 
+## Stay on plan across turns (objective + plan)
+- You act ONE step per turn, so a strategy spans many turns. To avoid forgetting WHY you started something, you keep a STANDING objective and plan that persist across turns until you change them — shown back to you at the top of every turn ("YOUR STANDING OBJECTIVE").
+- Set/update them with the optional "objective" (one line: your overall goal + why) and "plan" (up to 5 short ordered next-steps) fields on ANY action — it does not cost an extra turn. Omit them to leave them unchanged.
+- Use the plan to keep sub-goals alive: e.g. objective "Crush red player", plan ["scout red's base","mass 6 cavalry","attack red TC"] — so a scout you sent or a resource you still need is not forgotten once it scrolls out of your recent moves. Rewrite the plan as steps complete or priorities shift; note progress in the text ("scouting red — in progress").
+
 ## Actions (choose ONE per turn)
 - train_worker: train a worker at your Town Center.
 - train_unit: params.unitType = "militia" | "archer" | "scout_cavalry" (needs the right building).
@@ -1125,7 +1143,7 @@ Food (deer, berries, farms) - workers and units. Wood (trees) - buildings. Stone
 Return ONLY a single JSON object, no markdown, no code fences, no extra prose:
 {
   "action": "<action_name>",
-  "params": { "reason": "<how this moves you toward winning>" }
+  "params": { "reason": "<how this moves you toward winning>", "objective": "<optional: your standing goal>", "plan": ["optional","short","next-steps"] }
 }
 
 Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_structure, build_wonder, harvest_resource, assign_workers, explore, move_units, attack_target, delete_unit, destroy_building, wait${langDirective}`;
@@ -1147,6 +1165,19 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         // (Previously the current state was placed FIRST and the history AFTER it,
         // which scrambled past/present and made the model answer a stale old result.)
         const parts = [];
+
+        // 0) The model's STANDING objective/plan first, so its own intent frames the
+        //    whole turn. It persists across turns until the model changes it (via the
+        //    "objective"/"plan" fields on any action), so sub-goals survive even when
+        //    they fall off the move history below.
+        if ((controller.objective && controller.objective.trim()) || (controller.plan && controller.plan.length)) {
+            let s = `YOUR STANDING OBJECTIVE (you set this; it persists until you change it via the "objective"/"plan" fields on any action — update it as your plan evolves):`;
+            if (controller.objective && controller.objective.trim()) s += `\nGoal: ${controller.objective}`;
+            if (controller.plan && controller.plan.length) {
+                s += `\nPlan: ` + controller.plan.map((p, i) => `(${i + 1}) ${p}`).join('  ');
+            }
+            parts.push(s);
+        }
 
         // 1) Recent move history for continuity, oldest first. A long-ish window
         //    (historyLength) lets the model follow a multi-step plan across turns
@@ -1510,6 +1541,20 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         // Trim log
         if (this.decisionLog.length > this.maxLogEntries) {
             this.decisionLog = this.decisionLog.slice(0, this.maxLogEntries);
+        }
+
+        // Persist the model's standing objective/plan if it set one this turn. These
+        // live on the controller and are replayed at the TOP of every prompt, so a
+        // multi-step intent (and its surviving sub-goals) outlasts the move history.
+        // Wholesale-replace semantics: the model rewrites them when they change.
+        if (params && typeof params.objective === 'string' && params.objective.trim()) {
+            controller.objective = params.objective.trim().slice(0, 300);
+        }
+        if (params && Array.isArray(params.plan)) {
+            controller.plan = params.plan
+                .filter(s => typeof s === 'string' && s.trim())
+                .slice(0, 5)
+                .map(s => s.trim().slice(0, 120));
         }
 
         // Behavior metrics: count the attempted action
