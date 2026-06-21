@@ -1737,10 +1737,17 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         if (ut && ut !== 'worker') {
             return `[ERROR] train_worker only trains a Villager (worker) at the Town Center — it ignores unitType. To train "${ut}", use action "train_unit" with params.unitType="${ut}" (military units come from a barracks/archery_range/stable, not the Town Center).`;
         }
-        const townCenters = ai.buildings.filter(b => b.type === 'town_center' && !b.isProducing && !b.underConstruction);
+        const allTCs = ai.buildings.filter(b => b.type === 'town_center');
+        if (allTCs.length === 0) {
+            console.log(`[OpenAIAI] ${ai.id}: No Town Center at all to train worker`);
+            const tcDef = (typeof getBuildingDef === 'function') ? getBuildingDef('town_center') : null;
+            const costStr = tcDef ? this.costString(tcDef.cost) : '100 food, 100 wood, 100 stone, 100 gold';
+            return `[ERROR] You have NO Town Center, so you cannot train workers. Rebuild one: build_structure with buildingType="town_center" and a targetX/targetZ on open ground (costs ${costStr}; one of your existing workers constructs it). Until a Town Center stands you cannot make new workers.`;
+        }
+        const townCenters = allTCs.filter(b => !b.isProducing && !b.underConstruction);
         if (townCenters.length === 0) {
-            console.log(`[OpenAIAI] ${ai.id}: No available Town Center to train worker`);
-            return `[ERROR] No available Town Center to train worker (all are busy or still under construction).`;
+            console.log(`[OpenAIAI] ${ai.id}: Town Center busy/under construction`);
+            return `[ERROR] Your Town Center is busy producing or still under construction — wait for it to finish, then train the worker.`;
         }
 
         // Check population limit before training worker
