@@ -132,8 +132,9 @@ class AIManager {
         const popFree = Math.max(0, r.maxPopulation - r.population);
         const enemyWonder = this.knownEnemyWonder(ai);
 
-        // Always keep idle workers gathering the most-needed discovered resource.
-        this.assignWorkersToHarvest(ai);
+        // Keep the workforce productive: free finished scouts, put idle workers on
+        // the most-needed resource, and break single-resource starvation deadlocks.
+        this.manageWorkers(ai);
 
         // 1) POPULATION: don't choke. Build a house when nearly capped (and below
         //    the hard cap), so workers/military can keep being trained.
@@ -207,6 +208,35 @@ class AIManager {
         return nearest;
     }
 
+    // Send a worker to harvest a specific node (mirrors the game's own redirect:
+    // clears any in-progress harvest/carry so the move-then-harvest cycle restarts).
+    sendWorkerToResource(worker, node) {
+        worker.task = 'harvesting';
+        worker.harvestTarget = node;
+        worker.isHarvesting = false;
+        worker.carryingResource = false;
+        worker.harvestAmount = 0;
+        worker.isMoving = true;
+        worker.targetX = node.x + (Math.random() - 0.5) * 2;
+        worker.targetZ = node.z + (Math.random() - 0.5) * 2;
+    }
+
+    // Keep the workforce productive every think:
+    //  (a) free workers whose scouting leg is over so they rejoin the economy,
+    //  (b) put genuinely idle workers on the most-needed discovered resource,
+    //  (c) break single-resource starvation by rebalancing busy harvesters.
+    manageWorkers(ai) {
+        // (a) Without this, a worker once sent to explore keeps the 'scouting' task
+        //     forever (it's excluded from harvesting) and never works again.
+        ai.units.forEach(w => {
+            if (w.type !== 'worker' || w.task !== 'scouting') return;
+            w._scoutTicks = (w._scoutTicks || 0) + 1;
+            if (!w.isMoving || w._scoutTicks > 6) { w.task = null; w._scoutTicks = 0; }
+        });
+        this.assignWorkersToHarvest(ai);
+        this.rebalanceWorkers(ai);
+    }
+
     assignWorkersToHarvest(ai) {
         const idleWorkers = ai.units.filter(w => w.type === 'worker' &&
             !w.isMoving && !w.isHarvesting && !w.carryingResource && !w.isBuilding &&
@@ -219,14 +249,55 @@ class AIManager {
             // scout to reveal resources (fair: the models face the same fog).
             const target = this.findKnownResource(ai, worker, wantType) || this.findKnownResource(ai, worker, null);
             if (!target) return;
-            worker.task = 'harvesting';
-            worker.harvestTarget = target;
-            worker.isMoving = true;
-            worker.targetX = target.x + (Math.random() - 0.5) * 2;
-            worker.targetZ = target.z + (Math.random() - 0.5) * 2;
-            worker.carryingResource = false;
-            worker.harvestAmount = 0;
+            this.sendWorkerToResource(worker, target);
         });
+    }
+
+    // Deadlock breaker: if we're critically short of a resource that has a known
+    // node but too few (or no) workers on it, pull ONE worker off a well-stocked
+    // resource and send it there. One move per think keeps it stable, never thrashy.
+    // This is what stops a base from starving on food (and so being unable to train,
+    // research or build) while every worker mines a huge wood/stone node.
+    rebalanceWorkers(ai) {
+        const r = ai.resources;
+        const types = ['food', 'wood', 'stone', 'gold'];
+        const threshold = { food: 150, wood: 120, stone: 60, gold: 60 };
+        const minWhenShort = { food: 2, wood: 2, stone: 1, gold: 1 };
+
+        // Group active harvesters by the resource they're gathering.
+        const byType = { food: [], wood: [], stone: [], gold: [] };
+        ai.units.forEach(w => {
+            if (w.type !== 'worker') return;
+            if (w.task !== 'harvesting' && w.task !== 'carrying') return;
+            if (w.isBuilding || w.farmRef) return;
+            const t = w.harvestTarget && w.harvestTarget.type;
+            if (byType[t]) byType[t].push(w);
+        });
+
+        for (const t of types) {
+            if (r[t] >= threshold[t]) continue;            // not short
+            if (byType[t].length >= minWhenShort[t]) continue; // already staffed enough
+            const center = ai.buildings[0] || { x: 0, z: 0 };
+            if (!this.findKnownResource(ai, center, t)) continue; // exploreMap will scout it
+            // Donor: the type with the most harvesters that is itself NOT short and can
+            // spare one (stays at/above its own minimum).
+            let donorType = null, donorCount = 0;
+            for (const dt of types) {
+                if (dt === t || r[dt] < threshold[dt]) continue;
+                if (byType[dt].length > donorCount && byType[dt].length > minWhenShort[dt]) {
+                    donorCount = byType[dt].length; donorType = dt;
+                }
+            }
+            if (!donorType) continue;
+            // Prefer a donor not currently hauling goods (don't waste a trip).
+            const pool = byType[donorType];
+            const donor = pool.find(w => !w.carryingResource) || pool[pool.length - 1];
+            if (!donor) continue;
+            const node = this.findKnownResource(ai, donor, t);
+            if (!node) continue;
+            this.sendWorkerToResource(donor, node);
+            return; // one reassignment per think
+        }
     }
 
     // Send ONE spare unit to scout an unexplored frontier so resources/enemies get

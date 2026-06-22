@@ -2035,9 +2035,17 @@ class Game {
             
             // State 2: Harvesting at resource (not moving)
             if (unit.task === 'harvesting' && unit.isHarvesting && unit.harvestTarget) {
+                // Node emptied (e.g. by another worker) while we stood on it: stop and
+                // go idle so the owner can reassign us to a node that still has goods.
+                if (!unit.harvestTarget.isFarm && unit.harvestTarget.amount !== undefined && unit.harvestTarget.amount <= 0) {
+                    unit.task = null;
+                    unit.harvestTarget = null;
+                    unit.isHarvesting = false;
+                    return;
+                }
                 unit.harvestTimer = (unit.harvestTimer || 0) + deltaTime;
                 const harvestTime = 2000 / (owner.workerHarvestBonus || 1);
-                
+
                 if (unit.harvestTimer >= harvestTime) {
                     // Collect resource - store it on the worker, don't add to resources yet
                     const resourceType = unit.harvestTarget.type;
@@ -2046,8 +2054,15 @@ class Game {
                     // If harvesting from a farm, reduce farm's food amount
                     if (unit.harvestTarget.isFarm && unit.harvestTarget.farmRef) {
                         unit.harvestTarget.farmRef.foodAmount = Math.max(0, unit.harvestTarget.farmRef.foodAmount - amount);
+                    } else if (unit.harvestTarget.amount !== undefined) {
+                        // Finite nodes: deplete by what was taken. When empty, drop the
+                        // node (mesh removed; node kept in place so fog indices hold).
+                        unit.harvestTarget.amount = Math.max(0, unit.harvestTarget.amount - amount);
+                        if (unit.harvestTarget.amount <= 0 && this.terrain) {
+                            this.terrain.depleteResourceNode(unit.harvestTarget);
+                        }
                     }
-                    
+
                     // Store resource on worker - will be added to owner's resources when delivered
                     unit.carryingResource = true;
                     unit.carryingResourceType = resourceType;
@@ -2616,9 +2631,10 @@ class Game {
 
         // Draw resources (only in explored/visible areas) - drawn AFTER fog so they stay visible
         terrainData.resources.forEach(resource => {
+            if (resource.amount !== undefined && resource.amount <= 0) return; // depleted
             const x = (resource.x + terrainData.size / 2) * scale;
             const z = (resource.z + terrainData.size / 2) * scale;
-            
+
             // Only draw resources within minimap bounds
             if (x < 0 || x > 300 || z < 0 || z > 300) return;
             

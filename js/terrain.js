@@ -143,6 +143,21 @@ class TerrainManager {
         }
     }
 
+    // Deplete a node in place: empty it and drop its mesh, but KEEP it in the
+    // resources array. Harvesting decrements amount and calls this at zero. We must
+    // not splice here — every AI's fog memory (_knownResIdx) stores ARRAY INDICES,
+    // so removing an element mid-game would shift indices and corrupt it. An empty
+    // node (amount 0, mesh null) is skipped by all harvest/discovery/minimap code.
+    depleteResourceNode(res) {
+        if (!res) return;
+        res.amount = 0;
+        if (res.mesh) {
+            if (res.mesh.trunk) { this.scene.remove(res.mesh.trunk); this.scene.remove(res.mesh.leaves); }
+            else this.scene.remove(res.mesh);
+            res.mesh = null; // fog visibility + minimap skip nodes without a mesh
+        }
+    }
+
     // Clear every resource node within `radius` of (x,z). Used to keep starting
     // Town Centers from spawning on top of a node (which causes harvesters to
     // insta-drop). Returns how many were removed.
