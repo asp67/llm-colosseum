@@ -66,6 +66,9 @@ class AIManager {
 
             // Assign idle workers to harvest
             this.assignWorkersToHarvest(ai);
+
+            // Occasionally send a spare unit to scout, revealing the map (and enemies).
+            this.exploreMap(ai);
             
             // Decide what to do based on current state
             switch (ai.state) {
@@ -274,23 +277,51 @@ class AIManager {
         });
     }
 
+    // Periodically dispatch ONE spare scout toward an unexplored frontier so the map
+    // (and any hidden resources/enemies) gets revealed. Prefers an idle military unit
+    // so the economy is never disturbed; falls back to a genuinely idle worker only if
+    // no military is free. Throttled so it doesn't thrash a unit every tick.
+    exploreMap(ai) {
+        ai._exploreTimer = (ai._exploreTimer || 0) + 1;
+        if (ai._exploreTimer < 8) return;
+
+        const idleMilitary = ai.units.find(u => u.type !== 'worker' &&
+            !u.isAttacking && !u.attackTarget && !u.attackMove && !u.isMoving);
+        const idleWorker = ai.units.find(u => u.type === 'worker' &&
+            !u.isMoving && !u.isHarvesting && !u.carryingResource && !u.isBuilding &&
+            !u.farmRef && u.task !== 'building' && u.task !== 'farm_work');
+        const scout = idleMilitary || idleWorker;
+        if (!scout) return; // nothing to spare — try again next tick (keep workers gathering)
+
+        ai._exploreTimer = 0;
+        const half = (this.game.terrain ? this.game.terrain.size : 800) / 2 - 40;
+        scout.task = scout.type === 'worker' ? 'scouting' : null;
+        scout.isMoving = true;
+        scout.targetX = (Math.random() - 0.5) * 2 * half;
+        scout.targetZ = (Math.random() - 0.5) * 2 * half;
+    }
+
     findNearestResource(unit) {
         if (!this.game.terrain || !this.game.terrain.resources) return null;
-        
+
         let nearest = null;
         let minDist = Infinity;
-        
+
+        // No distance cap: take the nearest node with anything left, ANYWHERE on the
+        // map. Capping at 50 stranded workers (idle forever) once the home cluster ran
+        // dry; without it they walk out to the next deposit — gathering from, and
+        // revealing, the rest of the map instead of deadlocking.
         this.game.terrain.resources.forEach(resource => {
             if (resource.amount <= 0) return;
             const dx = resource.x - unit.x;
             const dz = resource.z - unit.z;
-            const dist = Math.sqrt(dx*dx + dz*dz);
-            if (dist < minDist && dist < 50) {
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < minDist) {
                 minDist = dist;
                 nearest = resource;
             }
         });
-        
+
         return nearest;
     }
 
