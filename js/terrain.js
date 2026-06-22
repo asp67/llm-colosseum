@@ -128,7 +128,7 @@ class TerrainManager {
                 animal.castShadow = false; // decorative; avoids shadow clutter
                 this.scene.add(animal);
 
-                this.resources.push({ type: 'food', x, z, amount: 300, mesh: animal, health: 300 });
+                this.resources.push({ type: 'food', x, z, amount: 500, mesh: animal, health: 500 });
             }
         }
     }
@@ -200,9 +200,9 @@ class TerrainManager {
                 type: 'wood',
                 x: x,
                 z: z,
-                amount: 200,
+                amount: 300,
                 mesh: { trunk, leaves },
-                health: 200
+                health: 300
             });
           }
         }
@@ -227,9 +227,9 @@ class TerrainManager {
                 type: 'stone',
                 x: x,
                 z: z,
-                amount: 400,
+                amount: 1000,
                 mesh: stone,
-                health: 400
+                health: 1000
             });
         }
     }
@@ -262,9 +262,9 @@ class TerrainManager {
                     type: 'gold',
                     x: x,
                     z: z,
-                    amount: 250,
+                    amount: 2000,
                     mesh: gold,
-                    health: 250
+                    health: 2000
                 });
             }
         }
