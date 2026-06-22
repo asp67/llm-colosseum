@@ -86,19 +86,84 @@ class UIManager {
     }
 
     showArenaSetup() {
+        this._setupMode = 'arena';
         this.showScreen('arenaSetupScreen');
         this.populateArenaSetup();
     }
 
-    // Build the Arena setup screen from the saved model-library config.
+    // Campaign uses the SAME setup screen as the Arena, but configured for a human
+    // player: a "You" civ picker, a 1–5 opponent-count selector, and opponent slots
+    // (each a civilization + a model or the rule-based AI).
+    showCampaignSetup() {
+        this._setupMode = 'campaign';
+        this.showScreen('arenaSetupScreen');
+        this.populateArenaSetup();
+    }
+
+    // Return to whichever setup screen the user came from (Arena or Campaign).
+    backToSetup() {
+        if (this._setupMode === 'campaign') this.showCampaignSetup();
+        else this.showArenaSetup();
+    }
+
+    // Build the setup screen from the saved config(s). The model library and the
+    // prompt template are shared between Arena and Campaign; only the participant
+    // slots and a couple of campaign-only controls differ.
     // Config is kept in memory so navigating to/from the library page preserves edits.
     async populateArenaSetup() {
+        if (!this._setupMode) this._setupMode = 'arena';
         if (!this._arenaConfig) this._arenaConfig = await this.loadArenaConfig();
+        const campaign = this._setupMode === 'campaign';
+        if (campaign && !this._campaignConfig) this._campaignConfig = this.loadCampaignConfig();
+        this.applySetupLabels(campaign);
+        const row = document.getElementById('campaignSetupRow');
+        if (row) row.style.display = campaign ? '' : 'none';
+        if (campaign) this.renderCampaignControls();
         this.renderArenaSlots();
         this.updateLibrarySummary();
         const ta = document.getElementById('arenaSharedPrompt');
         if (ta) ta.value = this._arenaConfig.prompt || this.getArenaDefaultPrompt();
     }
+
+    // Swap the screen's heading/subtitle/section-2/start-button text between the
+    // Arena and Campaign wording. We move the data-i18n key (not just textContent)
+    // so a later language switch re-translates to the correct mode's strings.
+    applySetupLabels(campaign) {
+        const set = (id, key) => { const el = document.getElementById(id); if (el) { el.setAttribute('data-i18n', key); el.textContent = t(key); } };
+        set('setupTitle', campaign ? 'cmp.title' : 'ar.title');
+        set('setupSubtitle', campaign ? 'cmp.subtitle' : 'ar.subtitle');
+        set('setupStep2H', campaign ? 'cmp.step2.h' : 'ar.step2.h');
+        set('setupStep2P', campaign ? 'cmp.step2.p' : 'ar.step2.p');
+        set('setupStartBtn', campaign ? 'cmp.start' : 'ar.start');
+    }
+
+    // Render the campaign-only "You play" civ picker and the 1–5 opponent count.
+    renderCampaignControls() {
+        const cc = this._campaignConfig;
+        const civNames = { egyptian: t('civ.egyptian.name'), greek: t('civ.greek.name'), persian: t('civ.persian.name'), yamato: t('civ.yamato.name') };
+        const civSel = document.getElementById('campaignPlayerCiv');
+        if (civSel) civSel.innerHTML = Object.keys(civNames).map(c => `<option value="${c}" ${cc.playerCiv === c ? 'selected' : ''}>${civNames[c]}</option>`).join('');
+        const cntSel = document.getElementById('campaignCount');
+        if (cntSel) cntSel.innerHTML = [1, 2, 3, 4, 5].map(n => `<option value="${n}" ${cc.count === n ? 'selected' : ''}>${n}</option>`).join('');
+    }
+
+    setCampaignPlayerCiv(v) { if (this._campaignConfig) { this._campaignConfig.playerCiv = v; this.saveSetup(); } }
+    setCampaignCount(v) {
+        if (!this._campaignConfig) return;
+        const n = Math.min(5, Math.max(1, parseInt(v, 10) || 3));
+        this._campaignConfig.count = n;
+        const sel = document.getElementById('campaignCount');
+        if (sel && sel.value !== String(n)) sel.value = String(n);
+        this.saveSetup();
+        this.renderArenaSlots();
+    }
+
+    // Active participant-slot array for the current setup mode.
+    setupSlots() { return this._setupMode === 'campaign' ? this._campaignConfig.slots : this._arenaConfig.slots; }
+    // How many of those slots are actually in play (campaign shows only `count`).
+    setupSlotCount() { return this._setupMode === 'campaign' ? this._campaignConfig.count : this._arenaConfig.slots.length; }
+
+    saveSetup() { this.saveArenaConfig(); this.saveCampaignConfig(); }
 
     // Open the dedicated model-library page.
     async showModelLibrary() {
@@ -303,6 +368,40 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         try {
             localStorage.setItem('arenaConfigV2', JSON.stringify(this.serializeArenaConfig()));
             localStorage.setItem('arenaPromptVersion', this.ARENA_PROMPT_VERSION);
+        } catch (e) {}
+    }
+
+    // Campaign config: the human's civ, opponent count (1–5) and a pool of 5
+    // opponent slots (civ + control). Models and the prompt template are shared
+    // with the Arena config, so only these campaign-specific fields are stored here.
+    loadCampaignConfig() {
+        let cc = null;
+        try { const s = localStorage.getItem('campaignConfigV1'); if (s) cc = JSON.parse(s); } catch (e) {}
+        const civs = ['greek', 'persian', 'yamato', 'egyptian', 'greek'];
+        if (!cc || !Array.isArray(cc.slots)) {
+            cc = { playerCiv: 'egyptian', count: 3, slots: civs.map(c => ({ civ: c, control: 'ki', prompt: null })) };
+        }
+        // Always keep a pool of exactly 5 slots so raising the count never adds blanks.
+        while (cc.slots.length < 5) cc.slots.push({ civ: civs[cc.slots.length] || 'greek', control: 'ki', prompt: null });
+        cc.slots = cc.slots.slice(0, 5);
+        cc.playerCiv = cc.playerCiv || 'egyptian';
+        cc.count = Math.min(5, Math.max(1, parseInt(cc.count, 10) || 3));
+        // Drop control ids that no longer match a model in the (shared) library.
+        const ids = (this._arenaConfig ? this._arenaConfig.models : []).map(m => m.id);
+        cc.slots.forEach(s => {
+            if (!s.civ) s.civ = 'greek';
+            if (s.control !== 'ki' && !ids.includes(s.control)) s.control = 'ki';
+            s._collapsed = true; // start collapsed for a clean overview
+        });
+        return cc;
+    }
+
+    saveCampaignConfig() {
+        if (!this._campaignConfig) return;
+        try {
+            const clone = JSON.parse(JSON.stringify(this._campaignConfig));
+            clone.slots.forEach(s => { delete s._collapsed; });
+            localStorage.setItem('campaignConfigV1', JSON.stringify(clone));
         } catch (e) {}
     }
 
@@ -565,7 +664,9 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         const civColor = { egyptian: '#ffd700', greek: '#4ecca3', persian: '#e94560', yamato: '#9b8cff' };
         const e = (s) => this.escapeHtml(s == null ? '' : String(s));
         const models = this._arenaConfig.models;
-        list.innerHTML = this._arenaConfig.slots.map((slot, i) => {
+        const campaign = this._setupMode === 'campaign';
+        const slotTitle = (i) => campaign ? t('cmp.opp', { n: i + 1 }) : t('ar.slot', { n: i + 1 });
+        list.innerHTML = this.setupSlots().slice(0, this.setupSlotCount()).map((slot, i) => {
             const civOpts = Object.keys(civNames).map(c => `<option value="${c}" ${slot.civ === c ? 'selected' : ''}>${civNames[c]}</option>`).join('');
             const modelOpts = models.map((mm, mi) => `<option value="${mm.id}" ${slot.control === mm.id ? 'selected' : ''}>${e((mm.name && mm.name.trim()) ? mm.name : (t('ar.unnamed') + ' ' + (mi + 1)))}</option>`).join('');
             const isLLM = slot.control !== 'ki';
@@ -598,7 +699,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             <div class="arena-slot ${collapsed ? 'collapsed' : 'expanded'}${isLLM ? ' has-prompt' : ''}" style="--civ:${civColor[slot.civ] || '#888'}">
                 <div class="arena-slot-head" onclick="game.ui.toggleArenaSlot(${i})">
                     <span class="arena-slot-caret">▶</span>
-                    <span class="arena-slot-title">${t('ar.slot', { n: i + 1 })}</span>
+                    <span class="arena-slot-title">${slotTitle(i)}</span>
                     <span class="arena-slot-summary">${civNames[slot.civ] || slot.civ} · ${e(ctrlName)}</span>
                 </div>
                 ${collapsed ? '' : body}
@@ -607,7 +708,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
     }
 
     toggleArenaSlot(i) {
-        const s = this._arenaConfig.slots[i];
+        const s = this.setupSlots()[i];
         if (s) { s._collapsed = s._collapsed === false; this.renderArenaSlots(); }
     }
 
@@ -662,32 +763,32 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         this.updateLibrarySummary();
     }
 
-    setSlotCiv(i, value) { const s = this._arenaConfig.slots[i]; if (s) { s.civ = value; this.saveArenaConfig(); this.renderArenaSlots(); } }
+    setSlotCiv(i, value) { const s = this.setupSlots()[i]; if (s) { s.civ = value; this.saveSetup(); this.renderArenaSlots(); } }
     setSlotControl(i, value) {
-        const s = this._arenaConfig.slots[i];
+        const s = this.setupSlots()[i];
         if (!s) return;
         s.control = (value === 'ki') ? 'ki' : Number(value);
         // Becoming an LLM slot? make sure it has a prompt (seed from the template).
         if (s.control !== 'ki' && (typeof s.prompt !== 'string' || !s.prompt.trim())) {
             s.prompt = this._arenaConfig.prompt || this.getArenaDefaultPrompt();
         }
-        this.saveArenaConfig();
+        this.saveSetup();
         this.renderArenaSlots(); // show/hide the per-slot prompt editor
     }
-    setSlotPrompt(i, value) { const s = this._arenaConfig.slots[i]; if (s) { s.prompt = value; this.saveArenaConfig(); } }
+    setSlotPrompt(i, value) { const s = this.setupSlots()[i]; if (s) { s.prompt = value; this.saveSetup(); } }
     resetSlotPrompt(i) {
-        const s = this._arenaConfig.slots[i];
+        const s = this.setupSlots()[i];
         if (!s) return;
         s.prompt = this._arenaConfig.prompt || this.getArenaDefaultPrompt();
-        this.saveArenaConfig();
+        this.saveSetup();
         this.renderArenaSlots();
     }
     onTemplatePromptInput(value) { if (this._arenaConfig) { this._arenaConfig.prompt = value; this.saveArenaConfig(); } }
     applyTemplateToAllSlots() {
         const tmpl = (document.getElementById('arenaSharedPrompt') || {}).value || this._arenaConfig.prompt || '';
         this._arenaConfig.prompt = tmpl;
-        this._arenaConfig.slots.forEach(s => { s.prompt = tmpl; });
-        this.saveArenaConfig();
+        this.setupSlots().forEach(s => { s.prompt = tmpl; });
+        this.saveSetup();
         this.renderArenaSlots();
     }
 
@@ -721,33 +822,49 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         return { type: 'none' };
     }
 
+    // Convert one participant slot into the engine's setup entry. A slot pointing
+    // at the rule-based AI — or at a model with no endpoint — becomes type 'ki'.
+    slotToSetupEntry(slot) {
+        const cfg = this._arenaConfig;
+        if (slot.control === 'ki') return { civ: slot.civ, type: 'ki' };
+        const m = cfg.models.find(mm => mm.id === slot.control);
+        if (!m || !(m.endpoint || '').trim()) return { civ: slot.civ, type: 'ki' };
+        return {
+            civ: slot.civ,
+            type: 'llm',
+            systemPrompt: ((slot.prompt && slot.prompt.trim()) ? slot.prompt : (cfg.prompt || '')).trim(),
+            connection: {
+                name: (m.name || m.model || m.endpoint).trim(),
+                endpoint: m.endpoint.trim(),
+                model: (m.model || '').trim(),
+                provider: m.provider || 'auto',
+                maxTokens: (() => { const n = parseInt(m.maxTokens, 10); return (n && n >= 64) ? n : null; })(),
+                contextSize: (() => { const n = parseInt(m.contextSize, 10); return (n && n >= 512) ? n : null; })(),
+                language: m.language || 'en',
+                auth: this.cleanAuth(m.auth)
+            }
+        };
+    }
+
     // Collect the 4-slot setup the arena engine expects.
     collectArenaSetup() {
         const cfg = this._arenaConfig;
         const ta = document.getElementById('arenaSharedPrompt');
         if (ta) cfg.prompt = ta.value;
         this.saveArenaConfig();
+        return cfg.slots.map(slot => this.slotToSetupEntry(slot));
+    }
 
-        return cfg.slots.map(slot => {
-            if (slot.control === 'ki') return { civ: slot.civ, type: 'ki' };
-            const m = cfg.models.find(mm => mm.id === slot.control);
-            if (!m || !(m.endpoint || '').trim()) return { civ: slot.civ, type: 'ki' };
-            return {
-                civ: slot.civ,
-                type: 'llm',
-                systemPrompt: ((slot.prompt && slot.prompt.trim()) ? slot.prompt : (cfg.prompt || '')).trim(),
-                connection: {
-                    name: (m.name || m.model || m.endpoint).trim(),
-                    endpoint: m.endpoint.trim(),
-                    model: (m.model || '').trim(),
-                    provider: m.provider || 'auto',
-                    maxTokens: (() => { const n = parseInt(m.maxTokens, 10); return (n && n >= 64) ? n : null; })(),
-                    contextSize: (() => { const n = parseInt(m.contextSize, 10); return (n && n >= 512) ? n : null; })(),
-                    language: m.language || 'en',
-                    auth: this.cleanAuth(m.auth)
-                }
-            };
-        });
+    // Collect the campaign setup: the human's civ + the chosen opponents.
+    collectCampaignSetup() {
+        const ta = document.getElementById('arenaSharedPrompt');
+        if (ta) this._arenaConfig.prompt = ta.value;
+        this.saveSetup();
+        const cc = this._campaignConfig;
+        return {
+            playerCiv: cc.playerCiv,
+            opponents: cc.slots.slice(0, cc.count).map(slot => this.slotToSetupEntry(slot))
+        };
     }
 
     // Reset the template AND every per-slot prompt to the current default.
@@ -757,9 +874,10 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             this._arenaConfig.prompt = def;
             this._arenaConfig.slots.forEach(s => { s.prompt = def; });
         }
+        if (this._campaignConfig) this._campaignConfig.slots.forEach(s => { s.prompt = def; });
         const ta = document.getElementById('arenaSharedPrompt');
         if (ta) ta.value = def;
-        this.saveArenaConfig();
+        this.saveSetup();
         this.renderArenaSlots();
     }
 

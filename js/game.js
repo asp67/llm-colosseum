@@ -92,7 +92,17 @@ class Game {
     }
 
     showCampaignSelection() {
-        this.ui.showCampaignSelection();
+        this.showCampaignSetup();
+    }
+
+    showCampaignSetup() {
+        this.ui.showCampaignSetup();
+    }
+
+    // The setup screen's Start button — dispatch to the right starter by mode.
+    startFromSetup() {
+        if (this.ui._setupMode === 'campaign') return this.startCampaignFromSetup();
+        return this.startArenaFromSetup();
     }
 
     showGameModeSelection() {
@@ -114,6 +124,17 @@ class Game {
     startSpectatorMode() {
         this.spectatorMode = true;
         this.startGame('spectator', 4); // 4 AI players, no human
+    }
+
+    // Start a Campaign (single-player) game from the setup screen: the human plays
+    // the chosen civ against 1–5 opponents, each controlled by a model or the
+    // rule-based AI. Opponents whose endpoints are unreachable fall back to
+    // rule-based automatically (see OpenAIAIManager.demoteToRuleBased).
+    startCampaignFromSetup() {
+        const setup = this.ui.collectCampaignSetup();
+        this.spectatorMode = false;
+        this.player.civilization = setup.playerCiv;
+        this.startGame('campaign', setup.opponents.length, setup.opponents);
     }
 
     // Start Arena from setup screen with per-player configuration
@@ -267,7 +288,10 @@ class Game {
         this.gameLoop();
     }
 
-    startGame(mode, numAI) {
+    // opponentConfigs (optional): Campaign per-opponent setup entries
+    // ({ civ, type:'ki'|'llm', connection?, systemPrompt? }). When given, opponents
+    // use these civs/controllers instead of the round-robin default.
+    startGame(mode, numAI, opponentConfigs = null) {
         this.ui.showScreen('gameScreen');
         this.gameStarted = true;
 
@@ -370,7 +394,9 @@ class Game {
             : civIds.filter(id => id !== this.player.civilization);
         
         for (let i = 0; i < numAI; i++) {
-            const aiCiv = aiCivs[i % aiCivs.length];
+            const aiCiv = (opponentConfigs && opponentConfigs[i] && opponentConfigs[i].civ)
+                ? opponentConfigs[i].civ
+                : aiCivs[i % aiCivs.length];
             const ai = this.aiManager.addAIPlayer(aiCiv, 'medium');
             
             // Create AI town center at their spawn position
@@ -395,16 +421,34 @@ class Game {
         // Stop any prior manager first so an old match's requests don't bleed in.
         if (this.openAIAIManager) this.openAIAIManager.stop();
         this.openAIAIManager = new OpenAIAIManager(this);
-        this.openAIAIManager.initAndAssign().then(() => {
-            console.log('[Game] OpenAI AI controllers ready');
-            if (this.ui.updateOpponentsPanel) this.ui.updateOpponentsPanel();
-        }).catch(err => {
-            console.error('[Game] OpenAI AI init failed:', err);
-        });
-        // Mark AI players as OpenAI-controlled so the rule-based AI skips them
-        this.aiManager.aiPlayers.forEach(ai => {
-            this.aiManager.markAsOpenAIControlled(ai.id);
-        });
+        if (opponentConfigs) {
+            // Campaign: each opponent is explicitly a model or the rule-based AI.
+            // Build controllers from the setup, then mark ONLY the LLM ones so the
+            // rule-based brain keeps driving the rule-based opponents.
+            this.openAIAIManager.initFromSetup(opponentConfigs).then(() => {
+                for (let i = 0; i < opponentConfigs.length; i++) {
+                    if (opponentConfigs[i].type === 'llm') {
+                        const ai = this.aiManager.aiPlayers[i];
+                        if (ai) this.aiManager.markAsOpenAIControlled(ai.id);
+                    }
+                }
+                console.log('[Game] Campaign AI controllers ready');
+                if (this.ui.updateOpponentsPanel) this.ui.updateOpponentsPanel();
+            }).catch(err => {
+                console.error('[Game] Campaign AI init failed:', err);
+            });
+        } else {
+            this.openAIAIManager.initAndAssign().then(() => {
+                console.log('[Game] OpenAI AI controllers ready');
+                if (this.ui.updateOpponentsPanel) this.ui.updateOpponentsPanel();
+            }).catch(err => {
+                console.error('[Game] OpenAI AI init failed:', err);
+            });
+            // Mark AI players as OpenAI-controlled so the rule-based AI skips them
+            this.aiManager.aiPlayers.forEach(ai => {
+                this.aiManager.markAsOpenAIControlled(ai.id);
+            });
+        }
 
         // Position camera
         if (this.spectatorMode) {

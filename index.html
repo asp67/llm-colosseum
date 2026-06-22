@@ -67,21 +67,13 @@
         <div class="selection-content">
             <h2 data-i18n="mode.title">Wähle Spielmodus</h2>
             <div class="mode-grid">
-                <div class="mode-card" onclick="game.startGame('standard', 3)">
-                    <h3 data-i18n="mode.standard">Standard</h3>
-                    <p data-i18n="mode.standardDesc">3 Computergegner</p>
-                </div>
-                <div class="mode-card" onclick="game.startGame('standard', 5)">
-                    <h3 data-i18n="mode.hard">Schwer</h3>
-                    <p data-i18n="mode.hardDesc">5 Computergegner</p>
-                </div>
-                <div class="mode-card" onclick="game.showCampaignSelection()">
+                <div class="mode-card" onclick="game.showCampaignSetup()">
                     <h3 data-i18n="mode.campaign">Kampagne</h3>
-                    <p data-i18n="mode.campaignDesc">Wähle eine Zivilisation und tritt gegen Computergegner an</p>
+                    <p data-i18n="mode.campaignDesc">Spiele selbst gegen 1–5 Gegner (Modelle oder regelbasierte KI)</p>
                 </div>
                 <div class="mode-card" onclick="game.showArenaSetup()">
                     <h3 data-i18n="mode.arena">🏟️ Arena</h3>
-                    <p data-i18n="mode.arenaDesc">4 LLM-Gegner kämpfen gegeneinander</p>
+                    <p data-i18n="mode.arenaDesc">4 Computer-Gegner kämpfen gegeneinander (ohne Spieler)</p>
                     <p style="font-size:0.8em; color:#aaa;" data-i18n="mode.arenaSub">Konfiguriere Endpunkte und System Prompts</p>
                 </div>
             </div>
@@ -267,8 +259,8 @@
     <!-- Arena Setup Screen -->
     <div id="arenaSetupScreen" class="screen">
         <div class="arena-setup-content">
-            <h2 data-i18n="ar.title">🏟️ Arena — Konfiguration</h2>
-            <p class="arena-setup-subtitle" data-i18n="ar.subtitle">Verbinde beliebig viele Modelle und lass vier davon gegeneinander antreten.</p>
+            <h2 id="setupTitle" data-i18n="ar.title">🏟️ Arena — Konfiguration</h2>
+            <p id="setupSubtitle" class="arena-setup-subtitle" data-i18n="ar.subtitle">Verbinde beliebig viele Modelle und lass vier davon gegeneinander antreten.</p>
             <div class="lang-picker lang-picker-inline">
                 <span class="lang-globe">🌐</span>
                 <select class="lang-select" data-i18n-lang onchange="setUiLang(this.value)" aria-label="Language">
@@ -299,8 +291,19 @@
                 <div class="arena-section-head">
                     <span class="arena-step">2</span>
                     <div>
-                        <h3 data-i18n="ar.step2.h">Arena-Teilnehmer</h3>
-                        <p data-i18n="ar.step2.p">Wähle für jeden der vier Plätze eine Zivilisation und ein Modell (oder die regelbasierte KI).</p>
+                        <h3 id="setupStep2H" data-i18n="ar.step2.h">Arena-Teilnehmer</h3>
+                        <p id="setupStep2P" data-i18n="ar.step2.p">Wähle für jeden der vier Plätze eine Zivilisation und ein Modell (oder die regelbasierte KI).</p>
+                    </div>
+                </div>
+                <!-- Campaign-only: the human's civ + how many opponents to face. -->
+                <div id="campaignSetupRow" class="campaign-setup-row" style="display:none;">
+                    <div class="arena-field">
+                        <label data-i18n="cmp.you">Du spielst</label>
+                        <select id="campaignPlayerCiv" onchange="game.ui.setCampaignPlayerCiv(this.value)"></select>
+                    </div>
+                    <div class="arena-field">
+                        <label data-i18n="cmp.count">Gegner</label>
+                        <select id="campaignCount" onchange="game.ui.setCampaignCount(this.value)"></select>
                     </div>
                 </div>
                 <div id="arenaSlotsList" class="arena-slots"></div>
@@ -478,7 +481,7 @@
             </div>
 
             <div class="arena-setup-buttons">
-                <button class="menu-btn" onclick="game.startArenaFromSetup()" data-i18n="ar.start">⚔️ Arena Starten</button>
+                <button id="setupStartBtn" class="menu-btn" onclick="game.startFromSetup()" data-i18n="ar.start">⚔️ Arena Starten</button>
                 <button class="menu-btn back-btn" onclick="game.ui.resetArenaPrompts()" data-i18n="ar.resetPrompt">↺ Standard-Prompt</button>
                 <button class="menu-btn back-btn" onclick="game.showGameModeSelection()" data-i18n="common.back">Zurück</button>
             </div>
@@ -507,7 +510,7 @@
             </div>
             <p class="auth-hint" data-i18n="ar.ioHint">Sichere deinen Modellkatalog in eine Datei. Achtung: Die Datei enthält API-Schlüssel im Klartext.</p>
             <div class="arena-setup-buttons">
-                <button class="menu-btn" onclick="game.ui.showArenaSetup()" data-i18n="ar.backToArena">← Zurück zur Arena-Konfiguration</button>
+                <button class="menu-btn" onclick="game.ui.backToSetup()" data-i18n="ar.backToArena">← Zurück zur Arena-Konfiguration</button>
             </div>
         </div>
     </div>
@@ -542,18 +545,18 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="js/i18n.js?v=200"></script>
-    <script src="js/civilizations.js?v=200"></script>
-    <script src="js/buildings.js?v=200"></script>
-    <script src="js/units.js?v=200"></script>
-    <script src="js/resources.js?v=200"></script>
-    <script src="js/terrain.js?v=200"></script>
-    <script src="js/fogofwar.js?v=200"></script>
-    <script src="js/ai.js?v=200"></script>
-    <script src="js/openai-ai.js?v=200"></script>
-    <script src="js/renderer.js?v=200"></script>
-    <script src="js/input.js?v=200"></script>
-    <script src="js/ui.js?v=200"></script>
-    <script src="js/game.js?v=200"></script>
+    <script src="js/i18n.js?v=201"></script>
+    <script src="js/civilizations.js?v=201"></script>
+    <script src="js/buildings.js?v=201"></script>
+    <script src="js/units.js?v=201"></script>
+    <script src="js/resources.js?v=201"></script>
+    <script src="js/terrain.js?v=201"></script>
+    <script src="js/fogofwar.js?v=201"></script>
+    <script src="js/ai.js?v=201"></script>
+    <script src="js/openai-ai.js?v=201"></script>
+    <script src="js/renderer.js?v=201"></script>
+    <script src="js/input.js?v=201"></script>
+    <script src="js/ui.js?v=201"></script>
+    <script src="js/game.js?v=201"></script>
 </body>
 </html>
