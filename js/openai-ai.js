@@ -1222,7 +1222,7 @@ Economy, technology and population are only MEANS to that end. Endlessly optimiz
 You play ${civ?.name || ai.civilization}. Unique bonus: ${civ?.bonus?.description || 'None'}. Play to this strength.
 
 ## How a turn works
-You receive the game state as JSON and issue EXACTLY ONE command for your civilization - an actual order, not advice.
+You receive the game state as JSON and issue EXACTLY ONE command for your civilization - an actual order, not advice. Earlier messages in this conversation may carry a "pastTurnRecap": a condensed snapshot using the SAME field names as the live state (epoch, resources, workers, threats …), with long per-entity lists replaced by counts — it is just memory of how the game looked on a previous turn. Your CURRENT, complete game state is ALWAYS the LAST message; decide from that.
 
 ## Path to victory (don't get stuck in the early phases)
 1. OPEN: train a couple of workers and send them to harvest food and wood; research and build a house early so population doesn't choke.
@@ -1294,45 +1294,45 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
     // threats and enemy wonders). Bounded so many turns fit the budget.
     buildCompactState(gs) {
         if (!gs || typeof gs !== 'object') {
-            try { return ('state: ' + JSON.stringify(gs)).slice(0, 400); } catch (e) { return 'state'; }
+            try { return JSON.stringify({ pastTurnRecap: true, raw: String(gs).slice(0, 160) }); } catch (e) { return '{"pastTurnRecap":true}'; }
         }
-        const r = gs.resources || {};
-        const ep = gs.epoch || {};
-        const wk = gs.workers || {};
-        const b = gs.buildings || {};
-        const th = gs.threats || {};
-        const num = (v) => (v == null ? '?' : v);
-        const parts = [];
-        parts.push(`age ${ep.currentEpoch || gs.player && gs.player.age || '?'}` +
-            (ep.upgradeInProgress ? `(→${ep.upgradeInProgress.targetEpoch} ${ep.upgradeInProgress.secondsRemaining}s)` : ''));
-        parts.push(`F${num(r.food)} W${num(r.wood)} S${num(r.stone)} G${num(r.gold)} pop ${num(r.population)}/${num(r.maxPopulation)}`);
-        if (wk.total != null) {
-            parts.push(`workers ${wk.total} [F${wk.harvestingFood} W${wk.harvestingWood} S${wk.harvestingStone} G${wk.harvestingGold} farm${wk.onFarms} build${wk.building} idle${wk.idle} scout${wk.scouting}]`);
-        }
+        const r = gs.resources || {}, ep = gs.epoch || {}, wk = gs.workers || {}, b = gs.buildings || {}, th = gs.threats || {};
         const fu = Array.isArray(gs.friendlyUnits) ? gs.friendlyUnits : [];
-        parts.push(`army ${fu.filter(u => u.type !== 'worker').length}`);
-        if (b.byType && Object.keys(b.byType).length) {
-            parts.push('bld ' + Object.keys(b.byType).map(k => `${k}:${b.byType[k]}`).join(',') +
-                (b.underConstruction ? ` (+${b.underConstruction} building)` : ''));
-        }
-        if (gs.research && gs.research.current) {
-            parts.push(`researching ${gs.research.current.techId} ${gs.research.current.secondsRemaining}s`);
-        }
-        if (Array.isArray(gs.resourcesOnMap)) {
-            const c = { food: 0, wood: 0, stone: 0, gold: 0 };
-            gs.resourcesOnMap.forEach(n => { if (c[n.type] != null) c[n.type]++; });
-            parts.push(`known nodes F${c.food} W${c.wood} S${c.stone} G${c.gold}`);
-        }
-        const eu = Array.isArray(gs.enemyUnits) ? gs.enemyUnits.length : 0;
-        const eb = Array.isArray(gs.enemyBuildings) ? gs.enemyBuildings.length : 0;
-        parts.push(`enemy seen: units ${eu}, buildings ${eb}`);
-        if (Array.isArray(th.underAttack) && th.underAttack.length) parts.push(`UNDER ATTACK x${th.underAttack.length}`);
-        if (Array.isArray(th.enemyWonders) && th.enemyWonders.length) {
-            const w = th.enemyWonders[0];
-            parts.push(`ENEMY WONDER (${w.state}${w.secondsUntilEnemyWins != null ? `, ${w.secondsUntilEnemyWins}s to lose` : ''})`);
-        }
-        const s = 'state: ' + parts.join(' | ');
-        const MAX = 700;
+        const nodes = { food: 0, wood: 0, stone: 0, gold: 0 };
+        (Array.isArray(gs.resourcesOnMap) ? gs.resourcesOnMap : []).forEach(n => { if (nodes[n.type] != null) nodes[n.type]++; });
+        // The keys mirror the FULL state schema (resources / workers / buildings /
+        // research / threats), so the model reads this past-turn recap exactly like
+        // the live state it already knows — no new shorthand to learn. "pastTurnRecap"
+        // flags it as condensed memory; counts replace the long per-entity arrays.
+        const recap = {
+            pastTurnRecap: true,
+            epoch: {
+                currentEpoch: ep.currentEpoch || (gs.player && gs.player.age) || 'unknown',
+                advancingTo: ep.upgradeInProgress ? ep.upgradeInProgress.targetEpoch : null
+            },
+            resources: { food: r.food, wood: r.wood, stone: r.stone, gold: r.gold, population: r.population, maxPopulation: r.maxPopulation },
+            workers: {
+                total: wk.total, harvestingFood: wk.harvestingFood, harvestingWood: wk.harvestingWood,
+                harvestingStone: wk.harvestingStone, harvestingGold: wk.harvestingGold,
+                onFarms: wk.onFarms, building: wk.building, idle: wk.idle, scouting: wk.scouting
+            },
+            militaryUnitCount: fu.filter(u => u.type !== 'worker').length,
+            buildingsByType: b.byType || {},
+            buildingsUnderConstruction: b.underConstruction || 0,
+            currentResearch: gs.research && gs.research.current ? gs.research.current.techId : null,
+            discoveredResourceNodeCounts: nodes,
+            enemySeen: {
+                units: Array.isArray(gs.enemyUnits) ? gs.enemyUnits.length : 0,
+                buildings: Array.isArray(gs.enemyBuildings) ? gs.enemyBuildings.length : 0
+            },
+            threats: {
+                underAttack: Array.isArray(th.underAttack) ? th.underAttack.length : 0,
+                enemyWonders: (Array.isArray(th.enemyWonders) ? th.enemyWonders : []).map(w => ({ state: w.state, secondsUntilEnemyWins: w.secondsUntilEnemyWins }))
+            }
+        };
+        let s;
+        try { s = JSON.stringify(recap); } catch (e) { s = '{"pastTurnRecap":true}'; }
+        const MAX = 1200;
         return s.length > MAX ? s.slice(0, MAX - 1) + '…' : s;
     }
 
