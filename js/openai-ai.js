@@ -1286,14 +1286,54 @@ Return ONLY a single JSON object, no markdown, no code fences, no extra prose:
 Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_structure, build_wonder, harvest_resource, assign_workers, explore, move_units, attack_target, delete_unit, destroy_building, wait${langDirective}`;
     }
 
-    // A compact, whitespace-collapsed snapshot of a turn's game state, capped so each
-    // replayed history turn (Option C) stays cheap.
-    buildCompactState(gameState) {
-        let s;
-        try { s = JSON.stringify(gameState); } catch (e) { s = String(gameState); }
-        s = s.replace(/\s+/g, ' ').trim();
-        const MAX = 900; // ~225 tokens per past turn
-        return s.length > MAX ? s.slice(0, MAX) + '…' : s;
+    // A compact but FAITHFUL summary of a turn's state, kept for Option C's replayed
+    // history. The CURRENT turn always sends the full state JSON — this is only the
+    // memory of PAST turns, so we distil the high-signal fields (resources, economy,
+    // army, research, known nodes, enemy presence, and threats) rather than blindly
+    // truncating the JSON (which dropped exactly the important late sections like
+    // threats and enemy wonders). Bounded so many turns fit the budget.
+    buildCompactState(gs) {
+        if (!gs || typeof gs !== 'object') {
+            try { return ('state: ' + JSON.stringify(gs)).slice(0, 400); } catch (e) { return 'state'; }
+        }
+        const r = gs.resources || {};
+        const ep = gs.epoch || {};
+        const wk = gs.workers || {};
+        const b = gs.buildings || {};
+        const th = gs.threats || {};
+        const num = (v) => (v == null ? '?' : v);
+        const parts = [];
+        parts.push(`age ${ep.currentEpoch || gs.player && gs.player.age || '?'}` +
+            (ep.upgradeInProgress ? `(→${ep.upgradeInProgress.targetEpoch} ${ep.upgradeInProgress.secondsRemaining}s)` : ''));
+        parts.push(`F${num(r.food)} W${num(r.wood)} S${num(r.stone)} G${num(r.gold)} pop ${num(r.population)}/${num(r.maxPopulation)}`);
+        if (wk.total != null) {
+            parts.push(`workers ${wk.total} [F${wk.harvestingFood} W${wk.harvestingWood} S${wk.harvestingStone} G${wk.harvestingGold} farm${wk.onFarms} build${wk.building} idle${wk.idle} scout${wk.scouting}]`);
+        }
+        const fu = Array.isArray(gs.friendlyUnits) ? gs.friendlyUnits : [];
+        parts.push(`army ${fu.filter(u => u.type !== 'worker').length}`);
+        if (b.byType && Object.keys(b.byType).length) {
+            parts.push('bld ' + Object.keys(b.byType).map(k => `${k}:${b.byType[k]}`).join(',') +
+                (b.underConstruction ? ` (+${b.underConstruction} building)` : ''));
+        }
+        if (gs.research && gs.research.current) {
+            parts.push(`researching ${gs.research.current.techId} ${gs.research.current.secondsRemaining}s`);
+        }
+        if (Array.isArray(gs.resourcesOnMap)) {
+            const c = { food: 0, wood: 0, stone: 0, gold: 0 };
+            gs.resourcesOnMap.forEach(n => { if (c[n.type] != null) c[n.type]++; });
+            parts.push(`known nodes F${c.food} W${c.wood} S${c.stone} G${c.gold}`);
+        }
+        const eu = Array.isArray(gs.enemyUnits) ? gs.enemyUnits.length : 0;
+        const eb = Array.isArray(gs.enemyBuildings) ? gs.enemyBuildings.length : 0;
+        parts.push(`enemy seen: units ${eu}, buildings ${eb}`);
+        if (Array.isArray(th.underAttack) && th.underAttack.length) parts.push(`UNDER ATTACK x${th.underAttack.length}`);
+        if (Array.isArray(th.enemyWonders) && th.enemyWonders.length) {
+            const w = th.enemyWonders[0];
+            parts.push(`ENEMY WONDER (${w.state}${w.secondsUntilEnemyWins != null ? `, ${w.secondsUntilEnemyWins}s to lose` : ''})`);
+        }
+        const s = 'state: ' + parts.join(' | ');
+        const MAX = 700;
+        return s.length > MAX ? s.slice(0, MAX - 1) + '…' : s;
     }
 
     // OPTION A: compressed one-line move history, newest kept, filled to `budget`
