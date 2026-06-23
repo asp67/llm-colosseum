@@ -1246,6 +1246,22 @@ body.spectator-mode .spectator-leaderboard { max-height: calc(100vh - 262px); }
 
 .model-select-row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
 .model-select-row .arena-field { flex: 1; min-width: 0; }
+/* Context budget: number input + a small "set to max" button on one row. */
+.ctx-budget-row { display: flex; gap: 6px; align-items: stretch; }
+.ctx-budget-row input { flex: 1; min-width: 0; }
+.ctx-max-btn {
+    flex: 0 0 auto; cursor: pointer; white-space: nowrap;
+    background: rgba(78, 204, 163, 0.15); color: #4ecca3;
+    border: 1px solid rgba(78, 204, 163, 0.4); border-radius: 6px;
+    padding: 0 10px; font-size: 0.85em; font-weight: 700;
+}
+.ctx-max-btn:hover { background: rgba(78, 204, 163, 0.28); }
+/* "Minimize token spending" checkbox row. */
+.ctx-mini-toggle {
+    display: flex; align-items: center; gap: 8px;
+    margin: 8px 0 2px; font-size: 0.9em; font-weight: 600; color: #cdd6e8; cursor: pointer;
+}
+.ctx-mini-toggle input { width: 16px; height: 16px; cursor: pointer; }
 /* Keep field captions on one line so the inputs in a row stay aligned. */
 .arena-field label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

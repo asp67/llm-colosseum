@@ -25,11 +25,10 @@ class OpenAIAIManager {
                                // previous match's models can't mutate the next one.
         this.decisionLog = []; // Array of { timestamp, playerId, civName, action, reason }
         this.maxLogEntries = 400; // keep a deep decision history for the spectator log
-        this.historyLength = 20; // recent moves replayed to each model every turn, so it can
-                                 // follow a multi-step plan (e.g. need gold -> train worker ->
-                                 // send to gold) and not "forget" a scout it just dispatched.
-                                 // Each entry is one short sentence (action + reason + outcome),
-                                 // so 20 is only a few hundred tokens — cheap to raise if needed.
+        this.historyLength = 20; // legacy fallback; the live window is now sized per
+                                 // model by its context budget (see sendToOpenAI).
+        this.maxHistoryEntries = 400; // how many past moves we RETAIN in memory; how
+                                 // many are actually SENT is chosen per turn by budget.
         this.modelsLoaded = false; // Prevent double-loading
     }
 
@@ -329,19 +328,68 @@ class OpenAIAIManager {
             }
             const data = await resp.json();
             let models;
+            const contextById = {};
             if (prov === 'ollama') {
                 models = (data.models || []).map(m => m.name || m.model).filter(Boolean);
+                // /api/tags doesn't carry context length; the ↺ button does /api/show.
             } else {
                 const list = data.data || data.models || [];
                 models = list.map(m => (typeof m === 'string' ? m : (m.id || m.name))).filter(Boolean)
                     .map(id => id.replace(/^models\//, '')); // strip Google's "models/" prefix
+                // Capture each model's context window when the endpoint reports it
+                // (field name varies: OpenRouter/vLLM/LM Studio/Google all differ).
+                list.forEach(m => {
+                    if (!m || typeof m !== 'object') return;
+                    const id = String(m.id || m.name || '').replace(/^models\//, '');
+                    const ctx = m.context_length || m.max_model_len || m.context_window ||
+                                m.max_context_length || m.n_ctx || m.inputTokenLimit ||
+                                (m.limits && (m.limits.context_length || m.limits.max_context_tokens));
+                    if (id && ctx && Number(ctx) >= 512) contextById[id] = Number(ctx);
+                });
             }
-            return { ok: true, models, provider: prov };
+            return { ok: true, models, provider: prov, contextById };
         } catch (e) {
             const msg = (e && e.name === 'AbortError') ? 'Zeitüberschreitung — Endpoint nicht erreichbar.'
                 : 'Verbindung fehlgeschlagen: ' + (e.message || e) + ' (CORS? Endpoint offline?)';
             return { ok: false, error: msg, provider: prov };
         }
+    }
+
+    // Best-effort fallback table of known context windows, keyed by id substring.
+    // Used when an endpoint doesn't report a model's context length.
+    static knownContextWindow(modelId, provider) {
+        const id = (modelId || '').toLowerCase();
+        const tbl = [
+            [/claude/, 200000],
+            [/gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-(?:1106|0125|0613-preview)|o1|o3|o4/, 128000],
+            [/gpt-4/, 8192],
+            [/gpt-3\.5/, 16385],
+            [/gemini-1\.5|gemini-2|gemini-exp/, 1000000],
+            [/gemini/, 32768],
+            [/llama-?3|llama3/, 8192],
+            [/mixtral|mistral/, 32768],
+            [/qwen/, 32768],
+            [/phi/, 16384],
+            [/deepseek/, 65536]
+        ];
+        for (const [re, v] of tbl) if (re.test(id)) return v;
+        if (provider === 'anthropic') return 200000; // all current Claude models
+        return null;
+    }
+
+    // Ask an Ollama server for a model's trained context length (/api/show).
+    static async fetchOllamaContext(endpoint, model, auth) {
+        try {
+            const headers = await OpenAIAIManager.buildAuthHeaders(auth || { type: 'none' }, 'ollama');
+            const resp = await OpenAIAIManager.fetchWithTimeout(
+                OpenAIAIManager.ollamaRoot(endpoint) + '/api/show',
+                { method: 'POST', headers, mode: 'cors', body: JSON.stringify({ name: model }) }, 8000);
+            if (!resp.ok) return null;
+            const d = await resp.json();
+            const mi = d.model_info || {};
+            for (const k in mi) { if (/\.context_length$/.test(k) && Number(mi[k]) >= 512) return Number(mi[k]); }
+            return null;
+        } catch (e) { return null; }
     }
 
     // ----------------------------------------------------------------
@@ -421,6 +469,8 @@ class OpenAIAIManager {
                 pending: false,
                 paused: false, // spectator can pause a model (e.g. when it runs out of quota)
                 conversationHistory: [], // Stores {action, result} for feedback loop
+                turnLog: [], // Rolling multi-turn pairs {user, assistant} for Option C
+                _pendingTurnUser: null, // compact state for THIS turn, stored after the reply
                 lastActionResult: null, // Most recent action result for next turn
                 pendingAdvice: [], // Spectator advice to inject into the next prompt
                 objective: '', // Model-authored standing goal ("why"), persists until it changes it
@@ -470,7 +520,8 @@ class OpenAIAIManager {
                 model: conn.model || 'default',
                 temperature: 0.7,
                 maxTokens: conn.maxTokens || 2000, // per-model cap on reply length (default 2000)
-                contextSize: conn.contextSize || null, // Ollama num_ctx (null = default 32768)
+                contextSize: conn.contextSize || null, // context budget (tokens); also Ollama num_ctx (null = 32768)
+                minimizeTokens: !!conn.minimizeTokens, // true = compact one-line history (Option A)
                 language: conn.language || 'en', // language the model reasons/answers in (independent of GUI)
                 customSystemPrompt: playerSetup.systemPrompt || null
             };
@@ -498,6 +549,8 @@ class OpenAIAIManager {
                 pending: false,
                 paused: false, // spectator can pause a model (e.g. when it runs out of quota)
                 conversationHistory: [], // Stores {action, result} for feedback loop
+                turnLog: [], // Rolling multi-turn pairs {user, assistant} for Option C
+                _pendingTurnUser: null, // compact state for THIS turn, stored after the reply
                 lastActionResult: null, // Most recent action result for next turn
                 pendingAdvice: [], // Spectator advice to inject into the next prompt
                 objective: '', // Model-authored standing goal ("why"), persists until it changes it
@@ -1233,6 +1286,60 @@ Return ONLY a single JSON object, no markdown, no code fences, no extra prose:
 Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_structure, build_wonder, harvest_resource, assign_workers, explore, move_units, attack_target, delete_unit, destroy_building, wait${langDirective}`;
     }
 
+    // A compact, whitespace-collapsed snapshot of a turn's game state, capped so each
+    // replayed history turn (Option C) stays cheap.
+    buildCompactState(gameState) {
+        let s;
+        try { s = JSON.stringify(gameState); } catch (e) { s = String(gameState); }
+        s = s.replace(/\s+/g, ' ').trim();
+        const MAX = 900; // ~225 tokens per past turn
+        return s.length > MAX ? s.slice(0, MAX) + '…' : s;
+    }
+
+    // OPTION A: compressed one-line move history, newest kept, filled to `budget`
+    // tokens, then rendered oldest-first. Returns '' when there's nothing to show.
+    buildMoveHistoryText(controller, budget, est) {
+        const hist = (controller.conversationHistory || []).filter(e => e && e.action && e.result);
+        if (!hist.length || budget < 80) return '';
+        const trim = (s) => { s = String(s).replace(/^\[ERROR\]\s*/, '').replace(/^OK\s*-\s*/, '').trim(); return s.length > 200 ? s.slice(0, 197) + '…' : s; };
+        const header = `Your recent moves THIS match (oldest first) — keep a consistent strategy, finish multi-step plans you started, and learn from the results:\n`;
+        let used = est(header);
+        const picked = [];
+        for (let i = hist.length - 1; i >= 0; i--) {
+            const e = hist[i];
+            const status = e.failed ? 'FAILED' : 'OK';
+            const why = e.reason ? ` ("${String(e.reason).slice(0, 120)}")` : '';
+            const line = `${e.action}${why} -> ${status}: ${trim(e.result)}`;
+            const cost = est(line) + 1;
+            if (used + cost > budget && picked.length) break; // always keep at least one
+            used += cost; picked.push(line);
+        }
+        picked.reverse();
+        return header + picked.map((l, i) => `${i + 1}. ${l}`).join('\n');
+    }
+
+    // OPTION C: rolling user/assistant pairs from the turn log, newest kept, filled to
+    // `budget` tokens, returned oldest-first and flattened into chat turns.
+    buildRollingTurns(controller, budget, est) {
+        const log = controller.turnLog || [];
+        if (!log.length || budget < 80) return [];
+        const picked = [];
+        let used = 0;
+        for (let i = log.length - 1; i >= 0; i--) {
+            const p = log[i];
+            const cost = est(p.user) + est(p.assistant) + 8;
+            if (used + cost > budget && picked.length) break;
+            used += cost; picked.push(p);
+        }
+        picked.reverse();
+        const turns = [];
+        picked.forEach(p => {
+            turns.push({ role: 'user', content: p.user });
+            turns.push({ role: 'assistant', content: p.assistant || '(no reply)' });
+        });
+        return turns;
+    }
+
     // ----------------------------------------------------------------
     // 9. Send request to OpenAI endpoint
     // ----------------------------------------------------------------
@@ -1248,72 +1355,67 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         //   recent moves (oldest -> newest)  ->  current state (LAST)  ->  advice.
         // (Previously the current state was placed FIRST and the history AFTER it,
         // which scrambled past/present and made the model answer a stale old result.)
-        const parts = [];
+        // ---- Rolling context sized to the model's context budget ----------------
+        // The history window now scales with each model's context budget instead of a
+        // fixed 20 moves, so big-context models actually remember more of the match.
+        const budget = (model.contextSize && model.contextSize >= 512) ? model.contextSize : 32768;
+        const reserve = (model.maxTokens || 2000) + 1500;        // leave room for the reply + margin
+        const inputBudget = Math.max(2000, budget - reserve);
+        const est = (s) => Math.ceil(String(s || '').length / 4); // ~4 chars/token heuristic
 
-        // 0) The model's STANDING objective/plan first, so its own intent frames the
-        //    whole turn. It persists across turns until the model changes it (via the
-        //    "objective"/"plan" fields on any action), so sub-goals survive even when
-        //    they fall off the move history below.
+        // (0) Standing objective/plan — frames every turn (sent in the present message).
+        const head = [];
         if ((controller.objective && controller.objective.trim()) || (controller.plan && controller.plan.length)) {
             let s = `YOUR STANDING OBJECTIVE (you set this; it persists until you change it via the "objective"/"plan" fields on any action — update it as your plan evolves):`;
             if (controller.objective && controller.objective.trim()) s += `\nGoal: ${controller.objective}`;
             if (controller.plan && controller.plan.length) {
                 s += `\nPlan: ` + controller.plan.map((p, i) => `(${i + 1}) ${p}`).join('  ');
             }
-            parts.push(s);
+            head.push(s);
         }
 
-        // 1) Recent move history for continuity, oldest first. A long-ish window
-        //    (historyLength) lets the model follow a multi-step plan across turns
-        //    instead of forgetting WHY it started something (e.g. it advanced-age,
-        //    found it lacked gold, trained a worker, sent it to gold). Each move is
-        //    one short sentence: action ("reason") -> OK/FAILED: outcome.
-        const recentHistory = controller.conversationHistory.slice(-this.historyLength);
-        if (recentHistory.length) {
-            const trim = (s) => { s = String(s).replace(/^\[ERROR\]\s*/, '').replace(/^OK\s*-\s*/, '').trim(); return s.length > 200 ? s.slice(0, 197) + '…' : s; };
-            const lines = recentHistory
-                .filter(e => e && e.action && e.result)
-                .map((e, i) => {
-                    const status = e.failed ? 'FAILED' : 'OK';
-                    const why = e.reason ? ` ("${String(e.reason).slice(0, 120)}")` : '';
-                    return `${i + 1}. ${e.action}${why} -> ${status}: ${trim(e.result)}`;
-                })
-                .join('\n');
-            if (lines) parts.push(`Your recent moves THIS match (oldest first) — keep a consistent strategy, finish multi-step plans you started, and learn from the results:\n${lines}`);
-        }
-
-        // 1b) Deferred attack outcomes: an attack to coordinates reports whether the
-        //     units engaged an enemy or found nothing only once they ARRIVE, so deliver
-        //     those verdicts now (exactly once).
+        // (tail) Everything framing the PRESENT turn: deferred attack outcomes, a note
+        // on an unparseable previous reply, the current state JSON, and spectator advice.
+        const tailNow = [];
         if (controller.pendingArrivalMessages && controller.pendingArrivalMessages.length) {
             const msgs = controller.pendingArrivalMessages;
             controller.pendingArrivalMessages = [];
-            parts.push(`RESULTS OF YOUR EARLIER ATTACK ORDER(S) — your units have now arrived:\n` + msgs.map(m => `- ${m}`).join('\n'));
+            tailNow.push(`RESULTS OF YOUR EARLIER ATTACK ORDER(S) — your units have now arrived:\n` + msgs.map(m => `- ${m}`).join('\n'));
         }
-
-        // 2) Feedback from a previous turn that produced NO valid action (e.g. a parse
-        //    failure) — that turn isn't in the history above, so surface it once.
-        const lastHistResult = recentHistory.length ? String(recentHistory[recentHistory.length - 1].result) : null;
+        const lastHistResult = controller.conversationHistory.length ? String(controller.conversationHistory[controller.conversationHistory.length - 1].result) : null;
         if (controller.lastActionResult && controller.lastActionResult !== lastHistResult) {
-            parts.push(`Note on your previous response: ${controller.lastActionResult}`);
+            tailNow.push(`Note on your previous response: ${controller.lastActionResult}`);
         }
-
-        // 3) The CURRENT situation — last, so the model responds to the present.
-        parts.push(`Here is your CURRENT game state. Analyze it and choose the single best action for THIS turn.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
-
-        // 4) Spectator advice queued for this model, delivered exactly once.
+        tailNow.push(`Here is your CURRENT game state. Analyze it and choose the single best action for THIS turn.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
         if (controller.pendingAdvice && controller.pendingAdvice.length) {
             const advice = controller.pendingAdvice.join(' ');
             controller.pendingAdvice = [];
-            parts.push(`SPECTATOR ADVICE (a human observer suggests — weigh it, you still decide): ${advice}`);
+            tailNow.push(`SPECTATOR ADVICE (a human observer suggests — weigh it, you still decide): ${advice}`);
         }
 
-        const userMessage = parts.join('\n\n');
+        // Remember a compact snapshot of THIS turn; after the reply it becomes one
+        // rolling history pair (Option C) so the next turn can replay it cheaply.
+        controller._pendingTurnUser = this.buildCompactState(gameState);
 
-        // A single user turn keeps the request valid for every provider (OpenAI,
-        // Anthropic, Ollama, Google all accept a lone user message after the system
-        // prompt) and avoids role-alternation pitfalls.
-        const turns = [{ role: 'user', content: userMessage }];
+        let turns;
+        if (model.minimizeTokens) {
+            // OPTION A — minimize tokens: a single user message whose embedded move
+            // history is compressed to one line each, filled to the remaining budget.
+            const fixed = [...head, ...tailNow].join('\n\n');
+            const histBudget = inputBudget - est(systemPrompt) - est(fixed);
+            const histText = this.buildMoveHistoryText(controller, histBudget, est);
+            const parts = [...head];
+            if (histText) parts.push(histText);
+            parts.push(...tailNow);
+            turns = [{ role: 'user', content: parts.join('\n\n') }];
+        } else {
+            // OPTION C — full multi-turn rolling conversation. The stable system-prompt
+            // prefix stays cacheable; older user/assistant pairs roll off by budget.
+            const currentUser = [...head, ...tailNow].join('\n\n');
+            const pairBudget = inputBudget - est(systemPrompt) - est(currentUser);
+            const pastTurns = this.buildRollingTurns(controller, pairBudget, est);
+            turns = [...pastTurns, { role: 'user', content: currentUser }];
+        }
 
         // Which protocol does this endpoint speak? (auto-detected when set to 'auto')
         const provider = OpenAIAIManager.resolveProvider(model);
@@ -1372,6 +1474,18 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             const data = await response.json();
             const norm = OpenAIAIManager.normalizeResponse(provider, data);
             const result = this.parseResponse(norm, controller);
+
+            // Record this exchange for the rolling multi-turn history (Option C):
+            // the compact state we showed + the model's (trimmed) reply.
+            if (controller._pendingTurnUser != null) {
+                const replyText = (norm && (norm.content || norm.reasoning)) ? String(norm.content || norm.reasoning) : '';
+                controller.turnLog.push({
+                    user: controller._pendingTurnUser,
+                    assistant: replyText.replace(/\s+/g, ' ').trim().slice(0, 600)
+                });
+                controller._pendingTurnUser = null;
+                if (controller.turnLog.length > 400) controller.turnLog = controller.turnLog.slice(-400);
+            }
 
             // Behavior metrics: time-to-answer + parse outcome
             const s = controller.stats;
@@ -1790,9 +1904,11 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
                 result: actionResult,
                 failed: !!logEntry.failed
             });
-            // Keep history manageable
-            if (controller.conversationHistory.length > this.historyLength) {
-                controller.conversationHistory = controller.conversationHistory.slice(-this.historyLength);
+            // Retain a deep history (bounded for memory). How MUCH of it is actually
+            // sent each turn is decided at request time by the model's context budget
+            // (buildMoveHistoryText), not by this cap.
+            if (controller.conversationHistory.length > this.maxHistoryEntries) {
+                controller.conversationHistory = controller.conversationHistory.slice(-this.maxHistoryEntries);
             }
             controller.lastActionResult = actionResult;
         }

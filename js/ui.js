@@ -281,9 +281,17 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
             model: opts.model || '',
             provider: opts.provider || 'auto', // auto | openai | anthropic | ollama | google
             maxTokens: opts.maxTokens || '',   // '' = use the default (2000)
-            contextSize: opts.contextSize || '', // Ollama only: num_ctx. '' = default (32768)
+            // Per-model context budget in tokens. Sizes the rolling chat history sent
+            // each turn (bigger budget = longer memory for big-context models) and is
+            // also used as Ollama's num_ctx. '' = default (32768). Lower = much faster.
+            contextSize: opts.contextSize || '',
+            // false = full multi-turn rolling history (Option C, cacheable, richer).
+            // true  = minimize tokens: compact one-line move history (Option A).
+            minimizeTokens: opts.minimizeTokens || false,
+            maxContext: opts.maxContext || null, // discovered model max (for the ↺ button/prefill)
             language: opts.language || 'en',   // language the model reasons/answers in (independent of GUI)
             availableModels: [],
+            availableModelContext: {},          // model id -> context length, from the last test (runtime only)
             _status: null,
             _expanded: false,
             auth: { type: 'none', key: '', username: '', password: '', headers: [], accessToken: '', tokenUrl: '', clientId: '', clientSecret: '', scope: '' }
@@ -305,6 +313,9 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         }
         if (m.maxTokens == null) m.maxTokens = '';
         if (m.contextSize == null) m.contextSize = '';
+        m.minimizeTokens = !!m.minimizeTokens;
+        if (m.maxContext == null) m.maxContext = null;
+        m.availableModelContext = {}; // runtime-only; never trust stored values
         m.auth = Object.assign({}, def.auth, m.auth || {});
         if (!Array.isArray(m.auth.headers)) m.auth.headers = [];
         // Runtime-only fields must never be restored from storage: a connection's
@@ -376,7 +387,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
     // cached tokens, test status and expand state). Real secrets ARE kept.
     serializeArenaConfig() {
         const clone = JSON.parse(JSON.stringify(this._arenaConfig));
-        clone.models.forEach(m => { if (m.auth) { delete m.auth._token; delete m.auth._tokenExp; } m._status = null; delete m._expanded; });
+        clone.models.forEach(m => { if (m.auth) { delete m.auth._token; delete m.auth._tokenExp; } m._status = null; delete m._expanded; delete m.availableModelContext; });
         return clone;
     }
 
@@ -615,13 +626,18 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
                     <input type="text" value="${e(m.model)}" oninput="game.ui.setModelField(${m.id},'model',this.value)" placeholder="model-id"></div>
                 <div class="arena-field" style="flex:0 0 150px"><label>${t('ar.fMaxTokens')}</label>
                     <input type="number" min="64" step="64" value="${e(m.maxTokens)}" oninput="game.ui.setModelField(${m.id},'maxTokens',this.value)" placeholder="2000"></div>
-                ${isOllama ? `<div class="arena-field" style="flex:0 0 160px"><label>${t('ar.fContextSize')}</label>
-                    <input type="number" min="512" step="512" value="${e(m.contextSize)}" oninput="game.ui.setModelField(${m.id},'contextSize',this.value)" placeholder="32768"></div>` : ''}
+                <div class="arena-field" style="flex:0 0 210px"><label>${t('ar.fContextBudget')}</label>
+                    <div class="ctx-budget-row">
+                        <input type="number" min="512" step="512" value="${e(m.contextSize)}" oninput="game.ui.setModelField(${m.id},'contextSize',this.value)" placeholder="32768">
+                        <button class="ctx-max-btn" title="${t('ar.ctxMaxTitle')}" onclick="game.ui.resetModelContextToMax(${m.id})">${t('ar.ctxMax')}</button>
+                    </div></div>
                 <div class="arena-field" style="flex:0 0 170px"><label>${t('ar.fModelLang')}</label>
                     <select onchange="game.ui.setModelField(${m.id},'language',this.value)">${langOpts}</select></div>
             </div>
+            <label class="ctx-mini-toggle"><input type="checkbox" ${m.minimizeTokens ? 'checked' : ''} onchange="game.ui.setModelBool(${m.id},'minimizeTokens',this.checked)"> ${t('ar.minimizeTokens')}</label>
             <p class="auth-hint">${t('ar.maxTokensHint')}</p>
-            ${isOllama ? `<p class="auth-hint">${t('ar.contextSizeHint')}</p>` : ''}
+            <p class="auth-hint">${t('ar.contextBudgetHint')}</p>
+            <p class="auth-hint">${t('ar.minimizeTokensHint')}</p>
             <p class="auth-hint">${t('ar.modelLangHint')}</p>
             ${isOllama ? `<p class="auth-hint ollama-hint">${t('ar.ollamaHint')}</p>` : ''}
             </div>
@@ -731,6 +747,31 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
 
     // --- Handlers ---
     setModelField(id, field, value) { const m = this.getArenaModel(id); if (m) { m[field] = value; this.saveArenaConfig(); } }
+    setModelBool(id, field, value) { const m = this.getArenaModel(id); if (m) { m[field] = !!value; this.saveArenaConfig(); } }
+
+    // Fill the context budget with the model's maximum context window. Tries (in
+    // order) the per-model context map captured during the last connection test, a
+    // built-in table of known commercial-model windows, then a live Ollama /api/show.
+    async resetModelContextToMax(id) {
+        const m = this.getArenaModel(id);
+        if (!m) return;
+        const prov = (m.provider && m.provider !== 'auto') ? m.provider : OpenAIAIManager.detectProvider(m.endpoint);
+        let max = (m.availableModelContext && m.availableModelContext[m.model]) ||
+                  OpenAIAIManager.knownContextWindow(m.model, prov);
+        if (!max && prov === 'ollama' && (m.model || '').trim()) {
+            max = await OpenAIAIManager.fetchOllamaContext(m.endpoint, m.model, this.cleanAuth(m.auth));
+        }
+        if (max && max >= 512) {
+            m.contextSize = max;
+            m.maxContext = max;
+            this.saveArenaConfig();
+            this.renderArenaLibrary();
+        } else {
+            // Couldn't detect — flag it on the model's status line so the user knows.
+            m._status = { cls: 'err', text: t('ar.ctxMaxUnknown') };
+            this.renderArenaLibrary();
+        }
+    }
     setAuthField(id, field, value) { const m = this.getArenaModel(id); if (m) { m.auth[field] = value; this.saveArenaConfig(); } }
     setAuthHeaderField(id, idx, field, value) {
         const m = this.getArenaModel(id); if (!m) return;
@@ -819,6 +860,12 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
         if (res.ok) {
             m.availableModels = res.models || [];
             if ((!m.model || !m.availableModels.includes(m.model)) && m.availableModels.length) m.model = m.availableModels[0];
+            // Remember each model's context window (when the endpoint reports it) for
+            // the ↺ button, and prefill an empty budget with the selected model's max.
+            m.availableModelContext = res.contextById || {};
+            const detected = m.availableModelContext[m.model] || OpenAIAIManager.knownContextWindow(m.model, res.provider);
+            if (detected) m.maxContext = detected;
+            if ((m.contextSize === '' || m.contextSize == null) && detected) m.contextSize = detected;
             const n = m.availableModels.length;
             const provNote = res.provider ? ` [${res.provider}]` : '';
             m._status = { cls: 'ok', text: n ? t('ar.testOk', { prov: provNote, n }) : t('ar.testOkNoList', { prov: provNote }) };
@@ -857,6 +904,7 @@ Respond with ONLY a single JSON object - no markdown, no code fences, no comment
                 provider: m.provider || 'auto',
                 maxTokens: (() => { const n = parseInt(m.maxTokens, 10); return (n && n >= 64) ? n : null; })(),
                 contextSize: (() => { const n = parseInt(m.contextSize, 10); return (n && n >= 512) ? n : null; })(),
+                minimizeTokens: !!m.minimizeTokens,
                 language: m.language || 'en',
                 auth: this.cleanAuth(m.auth)
             }
