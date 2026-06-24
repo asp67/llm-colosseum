@@ -536,77 +536,73 @@ class Game {
         if (!this.gameStarted) return;
 
         const currentTime = Date.now();
-        // Clamp the step so a long gap (e.g. the tab losing focus, which pauses
-        // requestAnimationFrame) doesn't produce one giant frame that teleports units.
-        const deltaTime = Math.min(100, currentTime - this.lastFrameTime);
+        let elapsed = currentTime - this.lastFrameTime;
         this.lastFrameTime = currentTime;
+        if (!(elapsed > 0)) elapsed = 0;
+        // When the tab loses focus the browser throttles (or pauses) requestAnimationFrame,
+        // so frames arrive far apart. The OLD code clamped the step to 100ms and DISCARDED
+        // the rest, so the game clock fell behind real time — timed mechanics (age-up,
+        // research, production) lagged and only "caught up" once focus returned. Instead we
+        // keep the full elapsed time (capped so a long hidden period can't freeze us) and
+        // feed it to the simulation in safe ≤100ms slices, which keeps timers in sync with
+        // real time without a single giant step teleporting units.
+        const MAX_CATCHUP = 2000; // ms of real time we'll replay in one frame at most
+        const simTime = Math.min(elapsed, MAX_CATCHUP);
 
-        // Update AI strategy (decisions, not unit actions - those are handled by game systems)
-        this.aiManager.update(deltaTime);
-
-        // Update OpenAI-powered AI controllers (round-robin LLM calls)
+        // Coarse, once-per-frame work (AI decision cadence and population don't need slicing).
+        this.aiManager.update(simTime);
         if (this.openAIAIManager) {
-            this.openAIAIManager.update(deltaTime);
+            this.openAIAIManager.update(simTime);
         }
-
-        // Update AI population counts
         this.aiManager.aiPlayers.forEach(ai => {
             ai.resources.updatePopulation(ai.units.length);
         });
 
-        // Update worker tasks (all workers: player + AI)
-        this.updateWorkerTasks(deltaTime);
-
-        // Update unit movement (non-worker units moving to right-click target, all units)
-        this.updateUnitMovement(deltaTime);
-
-        // Update production (all buildings: player + AI)
-        this.updateProduction(deltaTime);
-
-        // Update farm food regeneration (farms regenerate food, but workers must harvest it)
-        this.updateFarmRegeneration(deltaTime);
-
-        // Update combat (all units: player + AI)
-        this.updateCombat(deltaTime);
-
-        // Update tower auto-attack (all towers: player + AI)
-        this.updateTowerAttack(deltaTime);
-
-        // Auto-defense: rally idle units to repel attackers on home soil
-        this.updateAutoDefense(deltaTime);
-
-        // Update fog of war
-        if (this.fogOfWar) {
-            this.fogOfWar.update(deltaTime);
+        // Fine simulation in ≤100ms sub-steps so the FULL elapsed time is advanced.
+        const STEP_MAX = 100;
+        let remaining = simTime;
+        while (remaining > 0) {
+            const step = Math.min(STEP_MAX, remaining);
+            this.simulateStep(step);
+            remaining -= step;
         }
 
-        // Update progress bar UI
+        // UI / rendering: once per frame.
         this.updateProgressBar();
-        
-        // Update research progress
-        this.updateResearchProgress(deltaTime);
-        
-        // Update age upgrade progress
-        this.updateAgeUpgradeProgress(deltaTime);
-
-        // Update resources UI (i18n-aware; resources.updateUI is German and unused now)
         this.ui.updateResources(this.player.resources);
-
-        // Update age UI
         this.ui.updateAge(this.player.age);
-
-        // Check win/lose conditions
-        this.checkWinConditions(deltaTime);
+        this.checkWinConditions(simTime);
 
         // Update minimap periodically (every ~500ms)
         if (!this.minimapUpdateTimer) this.minimapUpdateTimer = 0;
-        this.minimapUpdateTimer += deltaTime;
+        this.minimapUpdateTimer += simTime;
         if (this.minimapUpdateTimer >= 500) {
             this.minimapUpdateTimer = 0;
             this.updateMinimap();
         }
 
         requestAnimationFrame(() => this.gameLoop());
+    }
+
+    // One fixed simulation slice (dt ≤ 100ms). Called once for a normal 60fps frame,
+    // or several times to replay a long/throttled frame without losing time.
+    simulateStep(dt) {
+        // Unit work + movement (movement is the teleport-sensitive part — keep dt small)
+        this.updateWorkerTasks(dt);
+        this.updateUnitMovement(dt);
+        // Timed production / economy
+        this.updateProduction(dt);
+        this.updateFarmRegeneration(dt);
+        // Combat
+        this.updateCombat(dt);
+        this.updateTowerAttack(dt);
+        this.updateAutoDefense(dt);
+        // Vision
+        if (this.fogOfWar) this.fogOfWar.update(dt);
+        // Timed progression (research + age-up) — these must advance in step with real
+        // time so the leaderboard age never lags behind the actual game.
+        this.updateResearchProgress(dt);
+        this.updateAgeUpgradeProgress(dt);
     }
 
     moveUnits(targetX, targetZ) {
