@@ -1367,14 +1367,20 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         let used = 0;
         for (let i = log.length - 1; i >= 0; i--) {
             const p = log[i];
-            const cost = est(p.user) + est(p.assistant) + 8;
+            const cost = est(p.user) + est(p.assistant) + est(p.outcome || '') + 16;
             if (used + cost > budget && picked.length) break;
             used += cost; picked.push(p);
         }
         picked.reverse();
         const turns = [];
-        picked.forEach(p => {
-            turns.push({ role: 'user', content: p.user });
+        picked.forEach((p, j) => {
+            // The OUTCOME of the previous turn's action is observed right before this
+            // turn's state — thread it in so the model sees the consequence of each
+            // decision (e.g. "REJECTED: no idle worker"), not just the decisions. This
+            // is what stops it repeating a rejected command once the window fills.
+            const prevOutcome = j > 0 ? picked[j - 1].outcome : null;
+            const userContent = (prevOutcome ? `RESULT of your previous action: ${prevOutcome}\n\n` : '') + p.user;
+            turns.push({ role: 'user', content: userContent });
             turns.push({ role: 'assistant', content: p.assistant || '(no reply)' });
         });
         return turns;
@@ -1400,8 +1406,13 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         // fixed 20 moves, so big-context models actually remember more of the match.
         const budget = (model.contextSize && model.contextSize >= 512) ? model.contextSize : 32768;
         const reserve = (model.maxTokens || 2000) + 1500;        // leave room for the reply + margin
-        const inputBudget = Math.max(2000, budget - reserve);
-        const est = (s) => Math.ceil(String(s || '').length / 4); // ~4 chars/token heuristic
+        // Keep a 10% safety headroom on top of the reply reserve. The char/token
+        // estimate below is approximate and JSON/German tokenize DENSER than English,
+        // so without headroom a "full" context can really overflow — and the provider
+        // then silently truncates the OLDEST tokens (our system prompt), which strips
+        // the rules and makes the model loop. Headroom keeps the system prompt safe.
+        const inputBudget = Math.max(2000, Math.floor((budget - reserve) * 0.9));
+        const est = (s) => Math.ceil(String(s || '').length / 3.5); // conservative ~3.5 chars/token
 
         // (0) Standing objective/plan — frames every turn (sent in the present message).
         const head = [];
@@ -1423,9 +1434,6 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             tailNow.push(`RESULTS OF YOUR EARLIER ATTACK ORDER(S) — your units have now arrived:\n` + msgs.map(m => `- ${m}`).join('\n'));
         }
         const lastHistResult = controller.conversationHistory.length ? String(controller.conversationHistory[controller.conversationHistory.length - 1].result) : null;
-        if (controller.lastActionResult && controller.lastActionResult !== lastHistResult) {
-            tailNow.push(`Note on your previous response: ${controller.lastActionResult}`);
-        }
         tailNow.push(`Here is your CURRENT game state. Analyze it and choose the single best action for THIS turn.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
         if (controller.pendingAdvice && controller.pendingAdvice.length) {
             const advice = controller.pendingAdvice.join(' ');
@@ -1437,6 +1445,11 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
         // rolling history pair (Option C) so the next turn can replay it cheaply.
         controller._pendingTurnUser = this.buildCompactState(gameState);
 
+        // The result of the immediately previous action (rejection reason, parse error,
+        // or OK + detail). The model MUST see this every turn or it will happily repeat
+        // a rejected command forever.
+        const prevResult = controller.lastActionResult || null;
+
         let turns;
         if (model.minimizeTokens) {
             // OPTION A — minimize tokens: a single user message whose embedded move
@@ -1446,12 +1459,23 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
             const histText = this.buildMoveHistoryText(controller, histBudget, est);
             const parts = [...head];
             if (histText) parts.push(histText);
+            // The move history already carries action outcomes; only surface a separate
+            // note for a previous reply that isn't in it (e.g. an unparseable response).
+            if (prevResult && prevResult !== lastHistResult) {
+                parts.push(`Note on your previous response: ${prevResult}`);
+            }
             parts.push(...tailNow);
             turns = [{ role: 'user', content: parts.join('\n\n') }];
         } else {
-            // OPTION C — full multi-turn rolling conversation. The stable system-prompt
-            // prefix stays cacheable; older user/assistant pairs roll off by budget.
-            const currentUser = [...head, ...tailNow].join('\n\n');
+            // OPTION C — full multi-turn rolling conversation. Past pairs carry their
+            // OUTCOMES (threaded in buildRollingTurns), and the present turn always
+            // states the result of the previous action so a rejected command is never
+            // silently repeated. The stable system-prompt prefix stays cacheable.
+            const preface = [...head];
+            if (prevResult) {
+                preface.push(`RESULT of your PREVIOUS action — learn from it; do NOT repeat a rejected action, fix the cause first: ${prevResult}`);
+            }
+            const currentUser = [...preface, ...tailNow].join('\n\n');
             const pairBudget = inputBudget - est(systemPrompt) - est(currentUser);
             const pastTurns = this.buildRollingTurns(controller, pairBudget, est);
             turns = [...pastTurns, { role: 'user', content: currentUser }];
@@ -1521,7 +1545,8 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
                 const replyText = (norm && (norm.content || norm.reasoning)) ? String(norm.content || norm.reasoning) : '';
                 controller.turnLog.push({
                     user: controller._pendingTurnUser,
-                    assistant: replyText.replace(/\s+/g, ' ').trim().slice(0, 600)
+                    assistant: replyText.replace(/\s+/g, ' ').trim().slice(0, 600),
+                    outcome: null // filled by recordAction once this turn's action resolves
                 });
                 controller._pendingTurnUser = null;
                 if (controller.turnLog.length > 400) controller.turnLog = controller.turnLog.slice(-400);
@@ -1951,6 +1976,13 @@ Valid actions: train_worker, train_unit, research_tech, upgrade_age, build_struc
                 controller.conversationHistory = controller.conversationHistory.slice(-this.maxHistoryEntries);
             }
             controller.lastActionResult = actionResult;
+            // Attach this outcome to the matching rolling-history turn (Option C) so the
+            // multi-turn replay shows the result of each past decision, not just the
+            // decision — otherwise the model can't tell a command keeps being rejected.
+            if (controller.turnLog && controller.turnLog.length) {
+                const lastTurn = controller.turnLog[controller.turnLog.length - 1];
+                if (lastTurn && lastTurn.outcome == null) lastTurn.outcome = actionResult;
+            }
         }
     }
 
