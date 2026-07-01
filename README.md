@@ -12,6 +12,12 @@ A browser-based, Age-of-Empires-style real-time strategy game in which competing
 ![Three.js](https://img.shields.io/badge/three.js-r128-blue)
 ![Providers](https://img.shields.io/badge/providers-OpenAI%20%C2%B7%20Anthropic%20%C2%B7%20Ollama%20%C2%B7%20Google-purple)
 
+<br>
+
+![LLM Colosseum — a quick tour](Screenshots/arena-walkthrough.gif)
+
+<sub><i>A quick tour: wiring up models in the library, then into the arena.</i></sub>
+
 </div>
 
 ---
@@ -29,6 +35,14 @@ Each model is handed:
 - and a single instruction: **win.**
 
 Then it has to keep doing that, turn after turn, for an entire match.
+
+<div align="center">
+
+![A live LLM Colosseum match](Screenshots/arena-live.png)
+
+<sub><i>A live match — the fog-limited 3D world, the streaming decision log (left), the ranked leaderboard (right), and the minimap.</i></sub>
+
+</div>
 
 ## Why it's an interesting (if unscientific) eval
 
@@ -81,13 +95,35 @@ Then open **http://localhost:8080** and click **Play → 🏟️ Arena**.
 3. **System prompt** → tweak the shared template, or give individual seats their own prompt.
 4. **⚔️ Start Arena** and watch.
 
-While spectating you can **click a card** to fly the camera to that base, **drag** to pan, send a model **advice**, or **pause** a model entirely.
+<div align="center">
+
+![The model library](Screenshots/model-library.png)
+
+<sub><i>The model library — mix local and cloud endpoints, test each connection, pick the served model, and export/import the catalogue.</i></sub>
+
+</div>
+
+While spectating you can **click a card** to fly the camera to that base, **drag** to pan, send a model **advice**, or **pause** a model entirely. The **decision log** streams every move alongside the model's own stated reason, and flags any rejected action:
+
+<div align="center">
+
+![The streaming decision log](Screenshots/decision-log.png)
+
+</div>
 
 > 💡 **A 32K context window is the sweet spot — bigger is usually worse.** The harness rebuilds each turn's prompt from scratch and keeps it deliberately small: the system prompt, the last ~20 moves compressed to one short sentence each, the model's own standing **objective + plan**, and the current state snapshot. Even a maxed-out late game (100 population, dozens of buildings and discovered nodes) lands around **~12K tokens**, so a **32K** window leaves comfortable headroom in virtually every match. Going much larger rarely helps and can *hurt* — on Ollama, an oversized `num_ctx` (e.g. 128K) can spill the model onto the CPU and cause slow turns or timeouts. The per-model **context size** defaults to **32768** for this reason; leave it there unless you have a specific need.
 >
 > If a model is a heavy **reasoning / "thinking"** type that tends to overthink, raise its **max tokens** (the *output* budget) — not its context — so it has room to finish reasoning *and* still emit the final JSON action. Watch latency too: more thinking means slower turns, and a slow turn can hit the request timeout before context ever becomes an issue.
 
 ## 🧮 How a model is scored
+
+<div align="center">
+
+![End-of-match model evaluation](Screenshots/model-evaluation.png)
+
+<sub><i>End-of-match evaluation — a winner, each model's 0–100 strategy score, and the raw stats behind it (latency, decisions, success rate, format fidelity, reasoning, behavior tags).</i></sub>
+
+</div>
 
 The match-end **Strategy Score** (0–100) is a transparent composite — no black box:
 
